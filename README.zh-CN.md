@@ -1,7 +1,6 @@
 # EventHorizon.RocketMQ.EventBus
 
 [![.NET Build](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml/badge.svg?branch=main)](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml)
-[![NuGet Core](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.EventBus.svg?label=NuGet%20Core)](https://www.nuget.org/packages/EventHorizon.RocketMQ.EventBus)
 [![NuGet gRPC EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Grpc.EventBus.svg?label=NuGet%20gRPC%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Grpc.EventBus)
 [![NuGet Remoting EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Remoting.EventBus.svg?label=NuGet%20Remoting%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Remoting.EventBus)
 [![Codecov](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/graph/badge.svg)](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus)
@@ -31,15 +30,15 @@
 exactly-once 投递。后续投递模式必须使用独立的适配器入口；只有主 Client 公开了合适的 hosted-delivery 抽象后才会
 增加。Handler 的业务副作用必须具备幂等性。
 
-## Package
+## 安装
 
 | Package | 职责 |
 | --- | --- |
-| `EventHorizon.RocketMQ.EventBus` | 公开契约、Newtonsoft.Json 序列化、路由、Handler 注册和公共分发运行时 |
 | `EventHorizon.RocketMQ.Remoting.EventBus` | classic Remoting Producer 与 Clustering Push Consumer 适配器 |
 | `EventHorizon.RocketMQ.Grpc.EventBus` | RocketMQ 5 gRPC Producer 与 Push Consumer 适配器 |
 
-两个适配器都依赖 Core，但不会相互引用。安装适配器会传递还原 Core；应用自己的事件契约项目可以直接引用 Core。
+安装实际使用的 RocketMQ 协议适配器即可。两个适配器会传递还原共享的 EventBus 实现，并且不会相互引用。该支持包会
+从 NuGet 搜索中取消列出，不作为用户直接安装的入口。
 
 ## 使用方式
 

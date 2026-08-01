@@ -24,8 +24,8 @@ dotnet add package EventHorizon.RocketMQ.Remoting.EventBus
 ```
 
 This package depends on the same-version `EventHorizon.RocketMQ.EventBus` Core package and
-`EventHorizon.RocketMQ.Remoting`. Core is restored transitively and is not embedded in this package. The Remoting and
-gRPC EventBus adapters do not reference each other.
+`EventHorizon.RocketMQ.Remoting`. Core is restored transitively, is not embedded in this package, and is not a direct
+user installation target. The Remoting and gRPC EventBus adapters do not reference each other.
 
 The adapter registers a closed protocol bridge through the existing public
 `AddRemotingPushConsumer<TMessageHandler>` API. Its internal generic anchor is the first application Handler owned by

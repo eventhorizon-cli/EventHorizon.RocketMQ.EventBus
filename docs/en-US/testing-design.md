@@ -229,8 +229,8 @@ the produced `.nupkg` and `.snupkg` files as workflow artifacts before publicati
 Publication is deliberately ordered:
 
 1. Push the Core package.
-2. Poll the configured package source until that exact Core version is available for adapter restore.
-3. Push the gRPC and Remoting adapter packages, which declare their ordinary same-version Core dependency.
+2. Push the gRPC and Remoting adapter packages immediately; both declare the same-version Core dependency.
+3. Unlist Core from NuGet search while retaining exact-version dependency restore.
 4. Create a GitHub Release for the tag only after both adapter pushes succeed; the Release is never marked as a prerelease.
 
 The publish workflow uses a non-cancelling release concurrency group, so two tags cannot interleave publication. It

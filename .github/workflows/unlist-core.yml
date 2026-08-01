@@ -1,0 +1,54 @@
+name: Unlist Core Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable Core package version to unlist
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  unlist:
+    name: Unlist supporting Core package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Validate stable version
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          stable_version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ ! "$VERSION" =~ $stable_version_pattern ]]; then
+            echo "::error title=Invalid package version::Expected <major>.<minor>.<patch> without a prerelease suffix; received '$VERSION'."
+            exit 1
+          fi
+
+      - name: Unlist Core from NuGet search
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION"
+          --api-key "$NUGET_API_KEY"
+          --source "$NUGET_SOURCE"
+          --non-interactive

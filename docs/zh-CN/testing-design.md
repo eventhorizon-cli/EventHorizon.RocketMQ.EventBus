@@ -212,8 +212,8 @@ v<major>.<minor>.<patch>
 发布必须按以下顺序进行：
 
 1. Push Core Package。
-2. 轮询配置的 Package Source，直到 Adapter Restore 可以获得该确切 Core Version。
-3. Push gRPC 与 Remoting Adapter Package；它们声明对同版本 Core 的普通依赖。
+2. 立即 Push gRPC 与 Remoting Adapter Package；它们声明对同版本 Core 的普通依赖。
+3. 从 NuGet 搜索中取消列出 Core，同时保留确切版本的依赖还原。
 4. 两个 Adapter Push 都成功后才为 tag 创建 GitHub Release；该 Release 永远不标记为 prerelease。
 
 发布 workflow 使用不会取消运行中发布的 release concurrency group，避免两个 tag 交错发布。它因为创建 GitHub Release

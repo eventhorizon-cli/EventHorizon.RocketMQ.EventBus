@@ -1,7 +1,6 @@
 # EventHorizon.RocketMQ.EventBus
 
 [![.NET Build](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml/badge.svg?branch=main)](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml)
-[![NuGet Core](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.EventBus.svg?label=NuGet%20Core)](https://www.nuget.org/packages/EventHorizon.RocketMQ.EventBus)
 [![NuGet gRPC EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Grpc.EventBus.svg?label=NuGet%20gRPC%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Grpc.EventBus)
 [![NuGet Remoting EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Remoting.EventBus.svg?label=NuGet%20Remoting%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Remoting.EventBus)
 [![Codecov](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/graph/badge.svg)](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus)
@@ -35,16 +34,16 @@ publishing, request-reply, and exactly-once delivery are outside this release. A
 separate adapter entry point and can be added only after the main client exposes an appropriate public hosted-delivery
 abstraction. Handlers must make their side effects idempotent.
 
-## Packages
+## Install
 
 | Package | Responsibility |
 | --- | --- |
-| `EventHorizon.RocketMQ.EventBus` | Public contracts, Newtonsoft.Json serialization, routing, Handler registration, and common dispatch runtime |
 | `EventHorizon.RocketMQ.Remoting.EventBus` | Classic Remoting Producer and clustering Push-consumer adapter |
 | `EventHorizon.RocketMQ.Grpc.EventBus` | RocketMQ 5 gRPC Producer and Push-consumer adapter |
 
-Both adapters depend on Core but never on each other. Installing an adapter restores Core transitively; an
-application-owned event-contract project may reference Core directly.
+Install the adapter for the chosen RocketMQ protocol. Both adapters restore the shared EventBus implementation
+transitively and never reference each other. That supporting package is intentionally unlisted from NuGet search and
+is not a direct user installation target.
 
 ## Programming model
 

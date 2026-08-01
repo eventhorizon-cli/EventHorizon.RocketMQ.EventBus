@@ -3,23 +3,17 @@
 [English](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.md) |
 [简体中文](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.zh-CN.md)
 
-`EventHorizon.RocketMQ.EventBus` is the protocol-neutral Core package for strongly typed integration events. It owns
-the public event, Handler, publisher, serializer, registration, routing, and dispatch contracts without referencing a
-gRPC or classic Remoting client package.
+`EventHorizon.RocketMQ.EventBus` is the shared implementation dependency for the strongly typed EventBus adapters. It
+owns the public event, Handler, publisher, serializer, registration, routing, and dispatch contracts without
+referencing a gRPC or classic Remoting client package. It is intentionally unlisted from NuGet search and is not a
+direct user installation target.
 
-Applications normally install one adapter and receive Core transitively:
+Install one adapter; it supplies these types transitively:
 
 ```shell
 dotnet add package EventHorizon.RocketMQ.Grpc.EventBus
 # or
 dotnet add package EventHorizon.RocketMQ.Remoting.EventBus
-```
-
-An application-owned event-contract project can reference Core directly when it shares event types without carrying a
-RocketMQ transport dependency:
-
-```shell
-dotnet add package EventHorizon.RocketMQ.EventBus
 ```
 
 ## Package boundary

@@ -117,21 +117,6 @@ jobs:
           test -f "$package"
           dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
 
-      - name: Wait for Core package availability
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          package_url="https://api.nuget.org/v3-flatcontainer/eventhorizon.rocketmq.eventbus/$VERSION/eventhorizon.rocketmq.eventbus.$VERSION.nupkg"
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error --head --location "$package_url" >/dev/null; then
-              exit 0
-            fi
-            echo "Waiting for Core package indexing ($attempt/30)..."
-            sleep 10
-          done
-          echo "::error title=Core package unavailable::NuGet did not expose version $VERSION before the timeout."
-          exit 1
-
       - name: Publish adapters
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -144,6 +129,16 @@ jobs:
             test -f "$package"
             dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
           done
+
+      - name: Unlist Core supporting package
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: >-
+          dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION"
+          --api-key "$NUGET_API_KEY"
+          --source "$NUGET_SOURCE"
+          --non-interactive
 
       - name: Create stable GitHub release
         env:

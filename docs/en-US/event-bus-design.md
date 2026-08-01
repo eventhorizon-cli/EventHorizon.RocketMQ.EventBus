@@ -60,16 +60,16 @@ package. See the [`ConsumeResult` handling design](consume-result-design.md#pack
 
 ### NuGet distribution
 
-All three projects produce NuGet packages with the same version and release tag. The Core package is published first;
-the two adapters are published only after that version is available from the package source.
+All three projects produce NuGet packages with the same version and release tag. The supporting Core package is pushed
+first, followed immediately by the two adapters, then unlisted after both adapter pushes succeed.
 
 Each adapter declares the same-version `EventHorizon.RocketMQ.EventBus` package as a normal dependency. Installing an
-adapter therefore restores Core transitively. A transport-neutral event-contract project can reference Core directly
-without bringing either RocketMQ protocol package into its dependency graph.
+adapter therefore restores Core transitively. Applications install an adapter, not Core directly.
 
-Core remains a normal listed package. Its assembly is not embedded into either adapter package, because duplicating the
-same public types across packages would create assembly and version conflicts when both adapters are referenced. The
-source projects use `ProjectReference`; packed adapters express the corresponding NuGet dependency.
+Core is intentionally unlisted from NuGet search but remains retrievable by its exact dependency version. Its assembly
+is not embedded into either adapter package, because duplicating the same public types across packages would create
+assembly and version conflicts when both adapters are referenced. The source projects use `ProjectReference`; packed
+adapters express the corresponding NuGet dependency.
 
 ### Public namespaces
 
@@ -831,8 +831,8 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
    consumer after the first handler registration. Default publishing registrations are unkeyed; named publishing
    registrations expose keyed `IEventBus`. All registrations isolate routes, handlers, lifetimes, serializer, and any
    configured transport roles.
-9. All three NuGet packages use one version and one release tag. Core is published first and is a normal transitive
-   dependency of both adapters.
+9. All three NuGet packages use one version and one release tag. Core is pushed first as an unlisted transitive
+   dependency of both adapters; adapters are pushed immediately afterward.
 10. Classic Remoting EventBus consumption uses clustering only; broadcasting is outside the first release.
 11. Both adapters log publish and consume outcomes by default through Microsoft logging. Publish and final Consumer
     outcomes include the full `Payload` as a JSON-formatted structured field; category filters control this potentially

@@ -22,8 +22,8 @@ dotnet add package EventHorizon.RocketMQ.Grpc.EventBus
 ```
 
 该 Package 依赖同版本的 `EventHorizon.RocketMQ.EventBus` Core Package 和
-`EventHorizon.RocketMQ.Grpc`。Core 会作为传递依赖还原，不会嵌入本 Package。gRPC 与 Remoting EventBus 适配器不会
-相互引用。
+`EventHorizon.RocketMQ.Grpc`。Core 会作为传递依赖还原，不会嵌入本 Package，也不作为用户直接安装的入口。gRPC 与
+Remoting EventBus 适配器不会相互引用。
 
 适配器通过现有公开 `AddGrpcPushConsumer<TMessageHandler>` API 注册闭合的协议桥接 Handler，其内部泛型 anchor
 是该 EventBus registration 的第一个自有应用 Handler。适配器不会检查 Service Descriptor，也不会访问 Client

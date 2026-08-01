@@ -3,21 +3,16 @@
 [English](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.md) |
 [简体中文](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.zh-CN.md)
 
-`EventHorizon.RocketMQ.EventBus` 是强类型集成事件的传输无关 Core Package。它拥有公开的事件、Handler、发布器、
-序列化器、注册、路由和分发契约，但不引用 gRPC 或 classic Remoting Client Package。
+`EventHorizon.RocketMQ.EventBus` 是强类型 EventBus 适配器共用的实现依赖。它拥有公开的事件、Handler、发布器、
+序列化器、注册、路由和分发契约，但不引用 gRPC 或 classic Remoting Client Package。该包会从 NuGet 搜索中取消列出，
+不作为用户直接安装的入口。
 
-应用通常安装一个适配器，并通过传递依赖获得 Core：
+安装一个适配器即可通过传递依赖获得这些类型：
 
 ```shell
 dotnet add package EventHorizon.RocketMQ.Grpc.EventBus
 # 或者
 dotnet add package EventHorizon.RocketMQ.Remoting.EventBus
-```
-
-应用自己的事件契约项目如果只需要共享事件类型、不希望引入 RocketMQ 传输依赖，可以直接引用 Core：
-
-```shell
-dotnet add package EventHorizon.RocketMQ.EventBus
 ```
 
 ## 包边界

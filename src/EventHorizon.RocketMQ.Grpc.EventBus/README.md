@@ -23,8 +23,8 @@ dotnet add package EventHorizon.RocketMQ.Grpc.EventBus
 ```
 
 This package depends on the same-version `EventHorizon.RocketMQ.EventBus` Core package and
-`EventHorizon.RocketMQ.Grpc`. Core is restored transitively and is not embedded in this package. The gRPC and
-Remoting EventBus adapters do not reference each other.
+`EventHorizon.RocketMQ.Grpc`. Core is restored transitively, is not embedded in this package, and is not a direct user
+installation target. The gRPC and Remoting EventBus adapters do not reference each other.
 
 The adapter registers a closed protocol bridge through the existing public
 `AddGrpcPushConsumer<TMessageHandler>` API. Its internal generic anchor is the first application Handler owned by that
