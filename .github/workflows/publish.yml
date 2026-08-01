@@ -49,6 +49,22 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Validate NuGet credentials
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_UNLIST_API_KEY: ${{ secrets.NUGET_UNLIST_API_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$NUGET_API_KEY" ]]; then
+            echo "::error title=Missing NuGet publishing credential::Set the NUGET_API_KEY repository secret."
+            exit 1
+          fi
+
+          if [[ -z "$NUGET_UNLIST_API_KEY" ]]; then
+            echo "::error title=Missing NuGet unlisting credential::Set the NUGET_UNLIST_API_KEY repository secret."
+            exit 1
+          fi
+
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
@@ -132,11 +148,11 @@ jobs:
 
       - name: Unlist Core supporting package
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_UNLIST_API_KEY: ${{ secrets.NUGET_UNLIST_API_KEY }}
           VERSION: ${{ steps.version.outputs.value }}
         run: >-
           dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION"
-          --api-key "$NUGET_API_KEY"
+          --api-key "$NUGET_UNLIST_API_KEY"
           --source "$NUGET_SOURCE"
           --non-interactive
 

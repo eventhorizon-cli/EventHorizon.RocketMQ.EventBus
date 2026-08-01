@@ -45,10 +45,16 @@ jobs:
 
       - name: Unlist Core from NuGet search
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_UNLIST_API_KEY: ${{ secrets.NUGET_UNLIST_API_KEY }}
           VERSION: ${{ inputs.version }}
-        run: >-
-          dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION"
-          --api-key "$NUGET_API_KEY"
-          --source "$NUGET_SOURCE"
-          --non-interactive
+        shell: bash
+        run: |
+          if [[ -z "$NUGET_UNLIST_API_KEY" ]]; then
+            echo "::error title=Missing NuGet unlisting credential::Set the NUGET_UNLIST_API_KEY repository secret."
+            exit 1
+          fi
+
+          dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION" \
+            --api-key "$NUGET_UNLIST_API_KEY" \
+            --source "$NUGET_SOURCE" \
+            --non-interactive
