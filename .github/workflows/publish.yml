@@ -1,0 +1,165 @@
+name: Publish NuGet Packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eventbus-release
+  cancel-in-progress: false
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  SOLUTION: EventHorizon.RocketMQ.EventBus.slnx
+
+jobs:
+  publish:
+    name: Validate, pack, and publish stable release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve stable package version
+        id: version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ ! "$TAG_NAME" =~ $stable_tag_pattern ]]; then
+            echo "::error title=Invalid release tag::Expected v<major>.<minor>.<patch> without a prerelease suffix; received '$TAG_NAME'."
+            exit 1
+          fi
+
+          echo "value=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build release
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: >-
+          dotnet build "$SOLUTION"
+          --configuration Release
+          --no-restore
+          -p:Version="$VERSION"
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Run unit tests
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: >-
+          dotnet test "$SOLUTION"
+          --configuration Release
+          --no-build
+          --no-restore
+          --filter "Category!=Integration"
+          -p:Version="$VERSION"
+
+      - name: Pack all packages
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          mkdir -p artifacts/packages
+          for project in \
+            src/EventHorizon.RocketMQ.EventBus/EventHorizon.RocketMQ.EventBus.csproj \
+            src/EventHorizon.RocketMQ.Grpc.EventBus/EventHorizon.RocketMQ.Grpc.EventBus.csproj \
+            src/EventHorizon.RocketMQ.Remoting.EventBus/EventHorizon.RocketMQ.Remoting.EventBus.csproj; do
+            dotnet pack "$project" \
+              --configuration Release \
+              --no-build \
+              --no-restore \
+              --output artifacts/packages \
+              -p:Version="$VERSION" \
+              -p:ContinuousIntegrationBuild=true
+          done
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: eventbus-nuget-${{ steps.version.outputs.value }}
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      - name: Publish Core
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          package="artifacts/packages/EventHorizon.RocketMQ.EventBus.$VERSION.nupkg"
+          test -f "$package"
+          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
+
+      - name: Wait for Core package availability
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          package_url="https://api.nuget.org/v3-flatcontainer/eventhorizon.rocketmq.eventbus/$VERSION/eventhorizon.rocketmq.eventbus.$VERSION.nupkg"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --head --location "$package_url" >/dev/null; then
+              exit 0
+            fi
+            echo "Waiting for Core package indexing ($attempt/30)..."
+            sleep 10
+          done
+          echo "::error title=Core package unavailable::NuGet did not expose version $VERSION before the timeout."
+          exit 1
+
+      - name: Publish adapters
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          for package_id in \
+            EventHorizon.RocketMQ.Grpc.EventBus \
+            EventHorizon.RocketMQ.Remoting.EventBus; do
+            package="artifacts/packages/$package_id.$VERSION.nupkg"
+            test -f "$package"
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
+          done
+
+      - name: Create stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "EventHorizon.RocketMQ.EventBus $VERSION" \
+              --generate-notes
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" \
+            artifacts/packages/*.nupkg \
+            artifacts/packages/*.snupkg \
+            --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false

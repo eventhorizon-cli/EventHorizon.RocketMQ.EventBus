@@ -1,0 +1,234 @@
+name: eventhorizon-rocketmq-eventbus
+
+x-image: &rocketmq-image apache/rocketmq:5.5.0
+x-broker-environment: &broker-environment
+  NAMESRV_ADDR: nameserver:9876
+  ROCKETMQ_ADVERTISED_HOST: ${ROCKETMQ_ADVERTISED_HOST:-host.docker.internal}
+  JAVA_OPT_EXT: -Duser.home=/home/rocketmq -Xms512m -Xmx512m
+x-broker-healthcheck: &broker-healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 60
+  start_period: 20s
+x-broker-dependencies: &broker-dependencies
+  nameserver:
+    condition: service_healthy
+  volume-init:
+    condition: service_completed_successfully
+
+services:
+  volume-init:
+    image: *rocketmq-image
+    user: "0:0"
+    network_mode: none
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p \
+          /volumes/nameserver-logs/rocketmqlogs \
+          /volumes/broker-a-logs/rocketmqlogs /volumes/broker-a-store \
+          /volumes/broker-b-logs/rocketmqlogs /volumes/broker-b-store \
+          /volumes/broker-c-logs/rocketmqlogs /volumes/broker-c-store \
+          /volumes/proxy-logs/rocketmqlogs
+        chown -R 3000:3000 /volumes/*
+    volumes:
+      - nameserver-logs:/volumes/nameserver-logs
+      - broker-a-logs:/volumes/broker-a-logs
+      - broker-a-store:/volumes/broker-a-store
+      - broker-b-logs:/volumes/broker-b-logs
+      - broker-b-store:/volumes/broker-b-store
+      - broker-c-logs:/volumes/broker-c-logs
+      - broker-c-store:/volumes/broker-c-store
+      - proxy-logs:/volumes/proxy-logs
+
+  nameserver:
+    image: *rocketmq-image
+    command: ["sh", "mqnamesrv"]
+    environment:
+      JAVA_OPT_EXT: -Duser.home=/home/rocketmq -Xms256m -Xmx256m
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:9876:9876"
+    volumes:
+      - nameserver-logs:/home/rocketmq/logs
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':2694 ' /proc/net/tcp || grep -q ':2694 ' /proc/net/tcp6"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s
+    networks: [rocketmq]
+
+  broker-a:
+    image: *rocketmq-image
+    command:
+      - sh
+      - -ec
+      - |
+        sed "s|__ADVERTISED_HOST__|$${ROCKETMQ_ADVERTISED_HOST}|g" \
+          /config/broker.conf.template > /tmp/broker.conf
+        exec sh /home/rocketmq/rocketmq-5.5.0/bin/mqbroker -c /tmp/broker.conf
+    environment: *broker-environment
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: *broker-dependencies
+    ports:
+      - "127.0.0.1:10909:10909"
+      - "127.0.0.1:10911:10911"
+      - "127.0.0.1:10912:10912"
+    volumes:
+      - ./broker-a.conf.template:/config/broker.conf.template:ro
+      - broker-a-logs:/home/rocketmq/logs
+      - broker-a-store:/home/rocketmq/store
+    healthcheck:
+      <<: *broker-healthcheck
+      test: ["CMD-SHELL", "grep -q ':2A9F ' /proc/net/tcp || grep -q ':2A9F ' /proc/net/tcp6"]
+    stop_grace_period: 45s
+    networks: [rocketmq]
+
+  broker-b:
+    image: *rocketmq-image
+    command:
+      - sh
+      - -ec
+      - |
+        sed "s|__ADVERTISED_HOST__|$${ROCKETMQ_ADVERTISED_HOST}|g" \
+          /config/broker.conf.template > /tmp/broker.conf
+        exec sh /home/rocketmq/rocketmq-5.5.0/bin/mqbroker -c /tmp/broker.conf
+    environment: *broker-environment
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: *broker-dependencies
+    ports:
+      - "127.0.0.1:10919:10919"
+      - "127.0.0.1:10921:10921"
+      - "127.0.0.1:10922:10922"
+    volumes:
+      - ./broker-b.conf.template:/config/broker.conf.template:ro
+      - broker-b-logs:/home/rocketmq/logs
+      - broker-b-store:/home/rocketmq/store
+    healthcheck:
+      <<: *broker-healthcheck
+      test: ["CMD-SHELL", "grep -q ':2AA9 ' /proc/net/tcp || grep -q ':2AA9 ' /proc/net/tcp6"]
+    stop_grace_period: 45s
+    networks: [rocketmq]
+
+  broker-c:
+    image: *rocketmq-image
+    command:
+      - sh
+      - -ec
+      - |
+        sed "s|__ADVERTISED_HOST__|$${ROCKETMQ_ADVERTISED_HOST}|g" \
+          /config/broker.conf.template > /tmp/broker.conf
+        exec sh /home/rocketmq/rocketmq-5.5.0/bin/mqbroker -c /tmp/broker.conf
+    environment: *broker-environment
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: *broker-dependencies
+    ports:
+      - "127.0.0.1:10929:10929"
+      - "127.0.0.1:10931:10931"
+      - "127.0.0.1:10932:10932"
+    volumes:
+      - ./broker-c.conf.template:/config/broker.conf.template:ro
+      - broker-c-logs:/home/rocketmq/logs
+      - broker-c-store:/home/rocketmq/store
+    healthcheck:
+      <<: *broker-healthcheck
+      test: ["CMD-SHELL", "grep -q ':2AB3 ' /proc/net/tcp || grep -q ':2AB3 ' /proc/net/tcp6"]
+    stop_grace_period: 45s
+    networks: [rocketmq]
+
+  proxy:
+    image: *rocketmq-image
+    command:
+      - sh
+      - -ec
+      - |
+        attempt=1
+        while [ "$${attempt}" -le 90 ]; do
+          cluster="$$(sh /home/rocketmq/rocketmq-5.5.0/bin/mqadmin clusterList -n nameserver:9876 2>/dev/null || true)"
+          if printf '%s\n' "$${cluster}" | grep -Fq eventbus-broker-a && \
+             printf '%s\n' "$${cluster}" | grep -Fq eventbus-broker-b && \
+             printf '%s\n' "$${cluster}" | grep -Fq eventbus-broker-c; then
+            exec sh /home/rocketmq/rocketmq-5.5.0/bin/mqproxy \
+              -pm cluster -n nameserver:9876 -pc /config/proxy.json
+          fi
+          attempt=$$((attempt + 1))
+          sleep 1
+        done
+        echo 'Proxy could not observe all three Brokers.' >&2
+        exit 1
+    environment:
+      NAMESRV_ADDR: nameserver:9876
+      JAVA_OPT_EXT: -Duser.home=/home/rocketmq -Xms512m -Xmx512m
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      broker-a:
+        condition: service_healthy
+      broker-b:
+        condition: service_healthy
+      broker-c:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./proxy.json:/config/proxy.json:ro
+      - proxy-logs:/home/rocketmq/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          (grep -q ':1F90 ' /proc/net/tcp || grep -q ':1F90 ' /proc/net/tcp6) &&
+          (grep -q ':1F91 ' /proc/net/tcp || grep -q ':1F91 ' /proc/net/tcp6)
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+    stop_grace_period: 45s
+    networks: [rocketmq]
+
+  resource-init:
+    image: *rocketmq-image
+    command: ["sh", "/config/init-resources.sh"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+    volumes:
+      - ./init-resources.sh:/config/init-resources.sh:ro
+    restart: "no"
+    networks: [rocketmq]
+
+  dashboard:
+    image: apacherocketmq/rocketmq-dashboard:2.1.0
+    environment:
+      JAVA_OPTS: -Drocketmq.namesrv.addr=nameserver:9876 -Drocketmq.config.proxyAddr=proxy:8080
+    depends_on:
+      resource-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':1F92 ' /proc/net/tcp || grep -q ':1F92 ' /proc/net/tcp6"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    networks: [rocketmq]
+
+networks:
+  rocketmq:
+    driver: bridge
+
+volumes:
+  nameserver-logs:
+  broker-a-logs:
+  broker-a-store:
+  broker-b-logs:
+  broker-b-store:
+  broker-c-logs:
+  broker-c-store:
+  proxy-logs:

@@ -1,0 +1,244 @@
+name: .NET Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  SOLUTION: EventHorizon.RocketMQ.EventBus.slnx
+
+jobs:
+  validate:
+    name: Format, build, samples, and Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Verify formatting
+        run: >-
+          dotnet format "$SOLUTION"
+          --no-restore
+          --verify-no-changes
+          --verbosity diagnostic
+
+      - name: Build solution
+        run: >-
+          dotnet build "$SOLUTION"
+          --configuration Release
+          --no-restore
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Validate Compose
+        run: >-
+          docker compose
+          -f test-environments/rocketmq-multi-broker/compose.yaml
+          config --quiet
+
+  unit_tests:
+    name: ${{ matrix.name }} unit tests and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: Core
+            project: tests/ut/EventHorizon.RocketMQ.EventBus.Tests/EventHorizon.RocketMQ.EventBus.Tests.csproj
+            coverage: core
+          - name: gRPC
+            project: tests/ut/EventHorizon.RocketMQ.Grpc.EventBus.Tests/EventHorizon.RocketMQ.Grpc.EventBus.Tests.csproj
+            coverage: grpc
+          - name: Remoting
+            project: tests/ut/EventHorizon.RocketMQ.Remoting.EventBus.Tests/EventHorizon.RocketMQ.Remoting.EventBus.Tests.csproj
+            coverage: remoting
+          - name: Compatibility
+            project: tests/ut/EventHorizon.RocketMQ.EventBus.Compatibility.Tests/EventHorizon.RocketMQ.EventBus.Compatibility.Tests.csproj
+            coverage: compatibility
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore "${{ matrix.project }}"
+
+      - name: Test
+        run: >-
+          dotnet test "${{ matrix.project }}"
+          --configuration Release
+          --no-restore
+          --collect:"XPlat Code Coverage"
+          --results-directory "${{ runner.temp }}/coverage/${{ matrix.coverage }}"
+          --logger "trx;LogFileName=${{ matrix.coverage }}.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.coverage }}-unit-test-results
+          path: ${{ runner.temp }}/coverage/${{ matrix.coverage }}/**/*.trx
+          if-no-files-found: warn
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          directory: ${{ runner.temp }}/coverage/${{ matrix.coverage }}
+          fail_ci_if_error: true
+          flags: unit-tests
+          name: eventbus-${{ matrix.coverage }}-unit-tests
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  net8_runtime:
+    name: ${{ matrix.name }} .NET 8 runtime validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Core
+            project: tests/ut/EventHorizon.RocketMQ.EventBus.Tests/EventHorizon.RocketMQ.EventBus.Tests.csproj
+          - name: gRPC
+            project: tests/ut/EventHorizon.RocketMQ.Grpc.EventBus.Tests/EventHorizon.RocketMQ.Grpc.EventBus.Tests.csproj
+          - name: Remoting
+            project: tests/ut/EventHorizon.RocketMQ.Remoting.EventBus.Tests/EventHorizon.RocketMQ.Remoting.EventBus.Tests.csproj
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore .NET 8 validation
+        run: dotnet restore "${{ matrix.project }}" -p:TargetFramework=net8.0
+
+      - name: Test .NET 8 validation
+        run: >-
+          dotnet test "${{ matrix.project }}"
+          --configuration Release
+          --no-restore
+          -p:TargetFramework=net8.0
+
+  integration:
+    name: ${{ matrix.protocol }} three-Broker integration tests
+    needs: [validate, unit_tests, net8_runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - protocol: gRPC
+            project: tests/it/EventHorizon.RocketMQ.Grpc.EventBus.IntegrationTests/EventHorizon.RocketMQ.Grpc.EventBus.IntegrationTests.csproj
+            result_name: grpc
+          - protocol: Remoting
+            project: tests/it/EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests/EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests.csproj
+            result_name: remoting
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore "${{ matrix.project }}"
+
+      - name: Test integration
+        run: >-
+          dotnet test "${{ matrix.project }}"
+          --configuration Release
+          --no-restore
+          --collect:"XPlat Code Coverage"
+          --results-directory "${{ runner.temp }}/results/${{ matrix.result_name }}"
+          --logger "trx;LogFileName=${{ matrix.result_name }}.trx"
+
+      - name: Upload integration results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.result_name }}-integration-test-results
+          path: ${{ runner.temp }}/results/${{ matrix.result_name }}
+          if-no-files-found: warn
+
+      - name: Upload integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          directory: ${{ runner.temp }}/results/${{ matrix.result_name }}
+          fail_ci_if_error: true
+          flags: integration-tests
+          name: eventbus-${{ matrix.result_name }}-integration-tests
+          token: ${{ secrets.CODECOV_TOKEN }}

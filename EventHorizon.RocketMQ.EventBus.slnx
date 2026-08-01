@@ -1,0 +1,32 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/samples/grpc/">
+    <Project Path="samples/grpc/Consumer/EventHorizon.RocketMQ.EventBus.Samples.Grpc.Consumer.csproj" />
+    <Project Path="samples/grpc/Publisher/EventHorizon.RocketMQ.EventBus.Samples.Grpc.Publisher.csproj" />
+  </Folder>
+  <Folder Name="/samples/remoting/">
+    <Project Path="samples/remoting/Consumer/EventHorizon.RocketMQ.EventBus.Samples.Remoting.Consumer.csproj" />
+    <Project Path="samples/remoting/Publisher/EventHorizon.RocketMQ.EventBus.Samples.Remoting.Publisher.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/EventHorizon.RocketMQ.EventBus/EventHorizon.RocketMQ.EventBus.csproj" />
+    <Project Path="src/EventHorizon.RocketMQ.Grpc.EventBus/EventHorizon.RocketMQ.Grpc.EventBus.csproj" />
+    <Project Path="src/EventHorizon.RocketMQ.Remoting.EventBus/EventHorizon.RocketMQ.Remoting.EventBus.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/it/">
+    <Project Path="tests/it/EventHorizon.RocketMQ.EventBus.IntegrationTestInfrastructure/EventHorizon.RocketMQ.EventBus.IntegrationTestInfrastructure.csproj" />
+    <Project Path="tests/it/EventHorizon.RocketMQ.Grpc.EventBus.IntegrationTests/EventHorizon.RocketMQ.Grpc.EventBus.IntegrationTests.csproj" />
+    <Project Path="tests/it/EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests/EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/ut/">
+    <Project Path="tests/ut/EventHorizon.RocketMQ.EventBus.Compatibility.Tests/EventHorizon.RocketMQ.EventBus.Compatibility.Tests.csproj" />
+    <Project Path="tests/ut/EventHorizon.RocketMQ.EventBus.Tests/EventHorizon.RocketMQ.EventBus.Tests.csproj" />
+    <Project Path="tests/ut/EventHorizon.RocketMQ.Grpc.EventBus.Tests/EventHorizon.RocketMQ.Grpc.EventBus.Tests.csproj" />
+    <Project Path="tests/ut/EventHorizon.RocketMQ.Remoting.EventBus.Tests/EventHorizon.RocketMQ.Remoting.EventBus.Tests.csproj" />
+  </Folder>
+</Solution>
