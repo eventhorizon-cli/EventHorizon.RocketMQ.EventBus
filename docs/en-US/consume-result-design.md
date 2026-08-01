@@ -1,6 +1,6 @@
 # ConsumeResult handling design
 
-[Documentation](README.md) | [Simplified Chinese](../zh-CN/consume-result-design.md) |
+[Documentation](README.md) | [简体中文](../zh-CN/consume-result-design.md) |
 [EventBus design](event-bus-design.md)
 
 This document defines how the EventBus adapters choose the transport-level `ConsumeResult` for one delivered

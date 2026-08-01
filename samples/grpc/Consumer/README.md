@@ -1,6 +1,6 @@
 # gRPC EventBus consumer
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 This Generic Host creates gRPC Push Consumers only; it does not configure a Producer. The default registration uses
 direct Handler registration for a tagged order route and an untagged inventory route. The order route has two Handlers,

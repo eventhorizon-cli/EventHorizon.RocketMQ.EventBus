@@ -1,6 +1,6 @@
 # Integration tests
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md) |
+[English](README.md) | [简体中文](README.zh-CN.md) |
 [Testing design](../../docs/en-US/testing-design.md)
 
 `tests/it` contains two protocol test assemblies and one non-test infrastructure library:

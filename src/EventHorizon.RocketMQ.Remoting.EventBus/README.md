@@ -1,7 +1,7 @@
 # EventHorizon.RocketMQ.Remoting.EventBus
 
 [English](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.Remoting.EventBus/README.md) |
-[Simplified Chinese](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.Remoting.EventBus/README.zh-CN.md)
+[简体中文](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.Remoting.EventBus/README.zh-CN.md)
 
 `EventHorizon.RocketMQ.Remoting.EventBus` is the strongly typed EventBus adapter for
 [EventHorizon.RocketMQ.Remoting](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ). It adds integration-event

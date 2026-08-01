@@ -15,7 +15,7 @@ You are an AI coding assistant for this repository.
 Use the following as the source of truth for detailed, evolving guidance instead of duplicating it here:
 
 - [English documentation index](docs/en-US/README.md) and
-  [Simplified Chinese documentation index](docs/zh-CN/README.md).
+  [简体中文文档索引](docs/zh-CN/README.md).
 - [EventBus design](docs/en-US/event-bus-design.md): package ownership, public contracts, routing, serialization,
   dependency injection, Generic Host lifecycle, logging, testing, and release structure.
 - [`ConsumeResult` handling design](docs/en-US/consume-result-design.md): common dispatch outcomes, adapter mappings,

@@ -1,6 +1,6 @@
 # Remoting EventBus publisher
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 This minimal Web API discovers routes through `RocketMQ:NamesrvAddr`. It enables a default Remoting EventBus publisher
 and a keyed `orders` publisher, but creates no Consumer. The application-facing operation is named `PublishAsync`

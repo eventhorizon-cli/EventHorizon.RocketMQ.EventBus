@@ -1,6 +1,6 @@
 # RocketMQ multi-Broker environment
 
-[All test environments](../README.md) | [Simplified Chinese](README.zh-CN.md)
+[All test environments](../README.md) | [简体中文](README.zh-CN.md)
 
 This fixed-port Docker Compose environment runs Apache RocketMQ 5.5.0 for the gRPC and classic Remoting EventBus
 samples, manual validation, and issue reproduction. It is separate from `tests/it`: integration tests create their own

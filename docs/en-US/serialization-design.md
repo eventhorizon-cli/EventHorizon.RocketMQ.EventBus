@@ -1,6 +1,6 @@
 # Serialization design
 
-[Documentation](README.md) | [Simplified Chinese](../zh-CN/serialization-design.md) |
+[Documentation](README.md) | [简体中文](../zh-CN/serialization-design.md) |
 [EventBus design](event-bus-design.md)
 
 This document defines the default JSON wire contract shared by the gRPC and Remoting EventBus adapters. Both adapters

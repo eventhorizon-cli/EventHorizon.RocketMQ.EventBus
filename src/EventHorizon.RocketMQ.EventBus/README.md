@@ -1,7 +1,7 @@
 # EventHorizon.RocketMQ.EventBus
 
 [English](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.md) |
-[Simplified Chinese](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.zh-CN.md)
+[简体中文](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.EventBus/README.zh-CN.md)
 
 `EventHorizon.RocketMQ.EventBus` is the protocol-neutral Core package for strongly typed integration events. It owns
 the public event, Handler, publisher, serializer, registration, routing, and dispatch contracts without referencing a

@@ -1,6 +1,6 @@
 # EventHorizon.RocketMQ.EventBus design
 
-[Documentation](README.md) | [Simplified Chinese](../zh-CN/event-bus-design.md) |
+[Documentation](README.md) | [简体中文](../zh-CN/event-bus-design.md) |
 [`ConsumeResult` handling design](consume-result-design.md) | [Serialization design](serialization-design.md) |
 [Testing design](testing-design.md)
 

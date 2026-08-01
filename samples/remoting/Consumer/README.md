@@ -1,6 +1,6 @@
 # Remoting EventBus consumer
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 This Generic Host creates clustering Remoting Push Consumers only; it does not configure a Producer. The default
 registration directly registers a tagged order route and an untagged inventory route. EventBus forces one message per

@@ -1,5 +1,11 @@
 # EventHorizon.RocketMQ.EventBus
 
+[![.NET Build](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml/badge.svg?branch=main)](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/actions/workflows/dotnet-build.yml)
+[![NuGet Core](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.EventBus.svg?label=NuGet%20Core)](https://www.nuget.org/packages/EventHorizon.RocketMQ.EventBus)
+[![NuGet gRPC EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Grpc.EventBus.svg?label=NuGet%20gRPC%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Grpc.EventBus)
+[![NuGet Remoting EventBus](https://img.shields.io/nuget/vpre/EventHorizon.RocketMQ.Remoting.EventBus.svg?label=NuGet%20Remoting%20EventBus)](https://www.nuget.org/packages/EventHorizon.RocketMQ.Remoting.EventBus)
+[![Codecov](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/graph/badge.svg)](https://codecov.io/gh/eventhorizon-cli/EventHorizon.RocketMQ.EventBus)
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 这是一个面向 [EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ) 的强类型 EventBus

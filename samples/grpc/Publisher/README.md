@@ -1,6 +1,6 @@
 # gRPC EventBus publisher
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 This minimal Web API connects to the RocketMQ 5 Proxy at `RocketMQ:GrpcEndpoint`. It enables a default gRPC EventBus
 publisher and a keyed `orders` publisher, but creates no Consumer. The application-facing operation is named

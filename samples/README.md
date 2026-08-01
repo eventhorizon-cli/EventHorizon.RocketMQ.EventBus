@@ -1,6 +1,6 @@
 # EventHorizon.RocketMQ.EventBus samples
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 The Publisher samples are minimal Web APIs; the Consumer samples are .NET Generic Host applications. The underlying
 RocketMQ Producer and Push-consumer roles are started and stopped by their existing `IHostedService` registrations;

@@ -1,6 +1,6 @@
 # Testing, environments, and samples design
 
-[Documentation](README.md) | [Simplified Chinese](../zh-CN/testing-design.md) |
+[Documentation](README.md) | [简体中文](../zh-CN/testing-design.md) |
 [EventBus design](event-bus-design.md)
 
 This document defines the repository's unit-test, integration-test, local-environment, and sample structure. It keeps

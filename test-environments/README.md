@@ -1,6 +1,6 @@
 # Test environments
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md) |
+[English](README.md) | [简体中文](README.zh-CN.md) |
 [Testing design](../docs/en-US/testing-design.md)
 
 `test-environments` contains implemented fixed-port Docker Compose environments for runnable samples, manual

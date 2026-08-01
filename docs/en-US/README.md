@@ -1,6 +1,6 @@
 # Documentation
 
-[Project README](../../README.md) | [Simplified Chinese](../zh-CN/)
+[Project README](../../README.md) | [简体中文](../zh-CN/)
 
 - [EventBus design](event-bus-design.md)
 - [`ConsumeResult` handling design](consume-result-design.md)
