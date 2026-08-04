@@ -240,8 +240,9 @@ Publication is deliberately ordered:
 4. Create a GitHub Release for the tag only after both adapter pushes succeed; the Release is never marked as a prerelease.
 
 The publish workflow uses a non-cancelling release concurrency group, so two tags cannot interleave publication. It
-needs `contents: write` because it creates the GitHub release. `NUGET_API_KEY` publishes packages and
-`NUGET_UNLIST_API_KEY` must be authorized to unlist the Core package. Package-source credentials where needed, and any
-reporting token are read from GitHub Actions secrets or
-the execution environment; no secret value is hard-coded. A missing required secret fails the publish operation before
-any package push.
+needs `contents: write` because it creates the GitHub release. One `NUGET_API_KEY` both publishes the three packages
+and unlists Core, so its NuGet.org scope must authorize both operations for the corresponding package IDs.
+Package-source credentials where needed, and any reporting token are read from GitHub Actions secrets or the execution
+environment; no secret value is hard-coded. A missing required secret fails the publish operation before any package
+push. NuGet.org still rejects an API key whose package ownership or operation scope is insufficient at the affected
+publish or unlist step.
