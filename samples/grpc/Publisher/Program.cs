@@ -8,7 +8,7 @@ using EventHorizon.RocketMQ.Grpc;
 using EventHorizon.RocketMQ.Grpc.EventBus;
 using Microsoft.OpenApi;
 
-const string OrdersRegistrationName = "orders";
+const string ordersRegistrationName = "orders";
 
 var builder = WebApplication.CreateBuilder(args);
 var endpoint = builder.Configuration["RocketMQ:GrpcEndpoint"] ?? "http://localhost:8081";
@@ -27,7 +27,7 @@ builder.Services
         options.Topics.Add("eventbus-inventory-snapshots");
     });
 builder.Services
-    .AddRocketMQGrpc(OrdersRegistrationName, options => options.Endpoint = endpoint)
+    .AddRocketMQGrpc(ordersRegistrationName, options => options.Endpoint = endpoint)
     .AddGrpcEventBus(configureProducer: options => options.Topics.Add("eventbus-orders"));
 
 var app = builder.Build();
@@ -67,7 +67,7 @@ static Task<IResult> PublishDefaultOrderAsync(
 
 static Task<IResult> PublishNamedOrderAsync(
     OrderSubmissionRequest? request,
-    [FromKeyedServices(OrdersRegistrationName)] IEventBus eventBus,
+    [FromKeyedServices(ordersRegistrationName)] IEventBus eventBus,
     CancellationToken cancellationToken) =>
     PublishOrderAsync(
         request,

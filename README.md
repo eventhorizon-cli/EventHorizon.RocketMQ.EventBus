@@ -29,10 +29,11 @@ The first release:
 - includes unit tests, protocol-specific three-Broker integration tests, runnable Consumer and Web API Publisher
   samples, and a separate Compose environment.
 
-Pull, Simple, POP, LitePush, SQL92, runtime subscriptions, transactional or ordered messages, delay messages, batch
-publishing, request-reply, and exactly-once delivery are outside this release. A later delivery mode must use a
-separate adapter entry point and can be added only after the main client exposes an appropriate public hosted-delivery
-abstraction. Handlers must make their side effects idempotent.
+Standalone Pull, Simple, LitePush, SQL92, runtime subscriptions, transactional or ordered messages, delay messages,
+batch publishing, request-reply, and exactly-once delivery are outside this release. Classic Remoting Push may use
+PULL or POP internally for Broker-owned assignments without changing the EventBus API or handler. A later public
+delivery model requires an appropriate main-client hosted-delivery abstraction. Handlers must make their side effects
+idempotent.
 
 ## Install
 

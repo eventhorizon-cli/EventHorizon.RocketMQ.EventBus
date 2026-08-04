@@ -7,7 +7,7 @@ using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 var endpoint = builder.Configuration["RocketMQ:GrpcEndpoint"] ?? "http://localhost:8081";
-const string OrdersRegistrationName = "orders";
+const string ordersRegistrationName = "orders";
 
 builder.Services
     .AddRocketMQGrpc(options => options.Endpoint = endpoint)
@@ -20,7 +20,7 @@ builder.Services
     .AddHandler<OrderSubmittedAuditHandler>()
     .AddHandler<InventorySnapshotHandler>();
 builder.Services
-    .AddRocketMQGrpc(OrdersRegistrationName, options => options.Endpoint = endpoint)
+    .AddRocketMQGrpc(ordersRegistrationName, options => options.Endpoint = endpoint)
     .AddGrpcEventBus(options =>
     {
         options.GroupName = "eventbus-grpc-orders-sample";

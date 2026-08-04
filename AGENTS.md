@@ -55,13 +55,12 @@ documented EventBus-specific reason to differ.
   outcome to each enum with an explicit switch; never cast by numeric value.
 - Keep transport message conversion, Producer integration, Push Consumer options, subscription materialization,
   protocol result mapping, and transport-specific logging in the owning adapter.
-- Keep Core consumption registration and dispatch transport-mode-neutral. A future mode gets a separate adapter entry
-  point and bridge, such as `AddGrpcLitePushEventBus` or `AddRemotingPopEventBus`, instead of adding a mode switch to
-  the first-release APIs. Add such an entry point only after the main client exposes a documented public
-  hosted-delivery abstraction; do not build a private queue loop, POP receipt lifecycle, or settlement layer inside
-  EventBus. Reuse `(Topic, Tag)` only when the transport mode has the same routing semantics. In particular, do not
-  overload `IntegrationEvent.Tag` with gRPC `LiteTopic`; design a separate Lite routing contract when that feature is
-  actually added.
+- Keep Core consumption registration and dispatch transport-mode-neutral. A future public delivery model such as gRPC
+  LitePush gets a separate adapter entry point and bridge only after the main client exposes a documented hosted-delivery
+  abstraction. Classic Remoting POP is not a separate EventBus model: the Remoting Push consumer may select PULL or POP
+  internally for Broker-owned assignments while preserving the same handler and `(Topic, Tag)` routing contract. Do not
+  build a private queue loop, POP receipt lifecycle, or settlement layer inside EventBus. Do not overload
+  `IntegrationEvent.Tag` with gRPC `LiteTopic`; design a separate Lite routing contract when that feature is added.
 - Keep public EventBus registration builders and extension methods at each owning package's project root and root
   namespace, matching the discoverability pattern used by Microsoft hosting and dependency-injection packages. Core
   public contracts use `Abstractions`, `Events`, `Exceptions`, and `Serialization` namespaces. Transport-neutral
@@ -106,8 +105,9 @@ documented EventBus-specific reason to differ.
   are configuration errors. Reusing a Handler type in another EventBus registration is a configuration error.
 - Dispatch one physical RocketMQ message per transport Handler invocation, deserialize it once, and then invoke all
   matching application Handlers sequentially. Transport prefetch and concurrent invocations remain configurable.
-  Force Remoting `ConsumeMessageBatchSize` to `1`; do not confuse this with receive `BatchSize`.
-- Use Push consumption only. Remoting EventBus consumption is clustering-only. Pull, Simple, POP, LitePush, FIFO,
+  Force Remoting `ConsumeMessageBatchSize` to `1`; do not confuse this with receive `PullBatchSize` or `PopBatchSize`.
+- Use Push consumption only. Remoting EventBus consumption is clustering-only and may use the main client's internal
+  PULL or POP receiver according to its effective queue assignment. Standalone Pull, Simple, LitePush, FIFO,
   transaction, delay, priority, batch-publish, request-reply, SQL92, and dynamic-subscription APIs remain outside the
   first release.
 - A message succeeds only after every matching application handler completes. Handler or dependency failures request

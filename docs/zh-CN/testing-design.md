@@ -55,7 +55,8 @@ Core Tests 覆盖：
 - 直接注册或程序集扫描尝试把同一 Handler 类型加入另一个默认或 named EventBus registration 时，在启动期失败；
 - 使用私有 token 隔离不同 registration 的 Route、Serializer 和不同 Handler 类型；
 - 固定使用 Scoped 协议桥接层，并保证每次投递只有一个由主客户端创建的异步 Scope；
-- 把每个内部 Outcome 显式映射到两个独立定义的传输层 `ConsumeResult`；
+- 把每个内部 Outcome 显式映射到两个独立定义的传输层 `ConsumeResult`，包括 gRPC 的 `Retry`、`DeadLetter`
+  最终都映射为 `Failure`；
 - Remoting 非成功发送状态会转换成发布失败；
 - CancellationToken 传播和订阅汇总启动行为。
 
@@ -96,7 +97,8 @@ Remoting IT 进程
 ```
 
 fixture 动态映射 NameServer 和全部 Broker 端口。每个 Broker 公布宿主机可达的地址和映射端口，因为生产 Remoting
-客户端会按返回路由直接连接对应 Broker。Remoting IT 不需要 Proxy。
+客户端会按返回路由直接连接对应 Broker。fixture 会启用 Broker assignment 与 POP，但 PULL 和 POP 流程使用
+独立的 Topic 与 Consumer Group。Remoting IT 不需要 Proxy。
 
 Proxy 可以解析宿主机进程无法使用的 Docker 别名，而适合宿主机的 `127.0.0.1` 路由又无法让 Proxy 区分三个对等
 container，因此两个 fixture 保持独立。可以提取公共生命周期 Helper，但不设计一个在部分模式下成员无效的公共
@@ -104,11 +106,14 @@ container，因此两个 fixture 保持独立。可以提取公共生命周期 H
 
 ## 当前 Integration Test 覆盖
 
-每个协议 Suite 都启动一个包含 EventBus Producer 和 Push Consumer 的 Generic Host。它们向 fixture 创建的同一 Topic
-并发发布十二条带 Tag 和十二条无 Tag 的事件，然后验证每个事件 ID 只会到达其匹配的强类型 Handler 一次，并确认三个
-Broker 都存储了消息。这覆盖公开注册、由 Host 管理的传输生命周期、Newtonsoft.Json Body 路径、字面量 Tag 路由、
-无 Tag 路由需要的通配订阅，以及 Remoting
-一条消息一次的分发约束。
+每个协议 Suite 都启动一个包含 EventBus Producer 和 Push Consumer 的 Generic Host。默认流程向 fixture 创建的
+Topic 并发发布十二条带 Tag 和十二条无 Tag 的事件，然后验证每个事件 ID 只会到达其匹配的强类型 Handler 一次，并
+确认三个 Broker 都存储了消息。这覆盖公开注册、由 Host 管理的传输生命周期、Newtonsoft.Json Body 路径、字面量
+Tag 路由、无 Tag 路由需要的通配订阅，以及 Remoting 一条消息一次的分发约束。
+
+Remoting Suite 还会在独立 Topic 与 Consumer Group 上运行 Broker 分配的 POP 流程。测试除了验证强类型 EventBus
+投递，还会等待真实 POP `ACK_MESSAGE` 响应完成后产生的 `ack` settlement Activity。PULL 只会产生 offset `commit`；
+如果实现退化为 PULL，测试会超时失败。原有流程继续覆盖默认的 Client assignment + PULL。
 
 Fixture 使用唯一 Topic 与 Group，通过有上限的可观察条件等待，并自行管理全部 Docker 资源。不需要真实 Broker 的
 结果映射、无效 Payload、未知路由、Retry 分类、named registration 等分支由确定性 Unit Test 覆盖。

@@ -21,3 +21,13 @@ internal sealed class RemotingUntaggedPushHandler(RemotingPushDeliveryRecorder r
         return Task.CompletedTask;
     }
 }
+
+internal sealed class RemotingPopPushHandler(RemotingPushDeliveryRecorder recorder)
+    : IIntegrationEventBusHandler<RemotingPopIntegrationEvent>
+{
+    public Task HandleAsync(RemotingPopIntegrationEvent integrationEvent, CancellationToken cancellationToken = default)
+    {
+        recorder.RecordTagged(integrationEvent.DeliveryId);
+        return Task.CompletedTask;
+    }
+}

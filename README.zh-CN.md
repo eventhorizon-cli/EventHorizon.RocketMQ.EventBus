@@ -26,9 +26,10 @@
 - 输出结构化的发布、消费、结果和订阅汇总日志；
 - 提供 Unit Tests、协议专用的三 Broker Integration Tests、可运行 Consumer 与 Web API Publisher samples，以及独立的 Compose 环境。
 
-首版不包含 Pull、Simple、POP、LitePush、SQL92、运行时订阅、事务或顺序消息、延迟消息、批量发布、请求-响应和
-exactly-once 投递。后续投递模式必须使用独立的适配器入口；只有主 Client 公开了合适的 hosted-delivery 抽象后才会
-增加。Handler 的业务副作用必须具备幂等性。
+首版不提供独立的 Pull、Simple、LitePush、SQL92、运行时订阅、事务或顺序消息、延迟消息、批量发布、请求-响应和
+exactly-once 投递。Classic Remoting Push 在 Broker 分配队列时可以内部使用 PULL 或 POP，不会改变 EventBus API 和
+Handler。后续如需增加新的公开投递模型，主 Client 必须先提供合适的 hosted-delivery 抽象。Handler 的业务副作用
+必须具备幂等性。
 
 ## 安装
 

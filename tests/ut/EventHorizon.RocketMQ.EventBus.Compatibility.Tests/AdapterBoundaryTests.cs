@@ -70,10 +70,10 @@ public sealed class AdapterBoundaryTests
     }
 
     [Fact]
-    public void ConsumeResult_RemainsOwnedByEachIndependentTransportPackage()
+    public void ConsumeResult_IndependentTransportPackages_ExposeProtocolSpecificValues()
     {
         Assert.NotEqual(typeof(GrpcConsumeResult), typeof(RemotingConsumeResult));
-        Assert.Equal(["Success", "Retry", "DeadLetter"], Enum.GetNames<GrpcConsumeResult>());
+        Assert.Equal(["Success", "Failure"], Enum.GetNames<GrpcConsumeResult>());
         Assert.Equal(["Success", "Retry", "DeadLetter"], Enum.GetNames<RemotingConsumeResult>());
     }
 

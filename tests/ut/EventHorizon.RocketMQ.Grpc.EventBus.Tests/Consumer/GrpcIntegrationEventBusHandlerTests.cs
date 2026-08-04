@@ -134,7 +134,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsDeadLetterForAnUnknownRouteAndLogsANonJsonPayloadAsBase64Json()
+    public async Task DispatchAsync_UnknownRoute_ReturnsFailureAndLogsDeadLetterPayloadAsBase64Json()
     {
         var logs = new RecordingLoggerProvider();
         var services = new ServiceCollection();
@@ -163,7 +163,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
             1,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.DeadLetter, result);
+        Assert.Equal(ConsumeResult.Failure, result);
         Assert.Contains(logs.Entries, static entry => entry.LogLevel == LogLevel.Error);
         var expectedBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payloadText));
         Assert.Contains(
@@ -174,7 +174,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
     }
 
     [Fact]
-    public async Task DispatchAsync_DoesNotLogThePayloadWhenDeserializationFails()
+    public async Task DispatchAsync_DeserializationFails_ReturnsFailureWithoutLoggingPayload()
     {
         using var logs = new RecordingLoggerProvider();
         var services = new ServiceCollection();
@@ -198,7 +198,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
             1,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.DeadLetter, result);
+        Assert.Equal(ConsumeResult.Failure, result);
         Assert.Contains(logs.Entries, static entry => entry.LogLevel == LogLevel.Error);
         Assert.DoesNotContain(
             logs.Entries,
@@ -206,7 +206,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsRetryWhenAnApplicationHandlerFails()
+    public async Task DispatchAsync_ApplicationHandlerFails_ReturnsFailure()
     {
         var services = CreateServices();
         services
@@ -228,11 +228,11 @@ public sealed class GrpcIntegrationEventBusHandlerTests
             1,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.Retry, result);
+        Assert.Equal(ConsumeResult.Failure, result);
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsRetryAndLogsTheOutcomeWhenTheDispatchBridgeFails()
+    public async Task DispatchAsync_DispatchBridgeFails_ReturnsFailureAndLogsRetryOutcome()
     {
         using var logs = new RecordingLoggerProvider();
         var services = CreateServices();
@@ -265,7 +265,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
             1,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.Retry, result);
+        Assert.Equal(ConsumeResult.Failure, result);
         Assert.Contains(logs.Entries, static entry =>
             entry.LogLevel == LogLevel.Error &&
             entry.Message.Contains("Outcome: Retry", StringComparison.Ordinal));

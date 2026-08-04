@@ -2,6 +2,8 @@ using EventHorizon.RocketMQ.EventBus;
 using EventHorizon.RocketMQ.EventBus.Abstractions;
 using EventHorizon.RocketMQ.EventBus.IntegrationTestInfrastructure;
 using EventHorizon.RocketMQ.Remoting.Admin;
+using EventHorizon.RocketMQ.Remoting.Consumer;
+using EventHorizon.RocketMQ.Remoting.Consumer.Push;
 using EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -39,8 +41,9 @@ public sealed class RemotingEventBusPushIntegrationTests(RocketMQRemotingCluster
                 configureConsumer: options =>
                 {
                     options.GroupName = $"eventbus-remoting-it-{Guid.NewGuid():N}";
+                    options.InitialPosition = ConsumeFromPosition.Beginning;
                     options.MaxConcurrency = 4;
-                    options.BatchSize = 4;
+                    options.PullBatchSize = 4;
                     options.LongPollingTimeout = TimeSpan.FromSeconds(3);
                 },
                 configureProducer: options => options.GroupName = $"eventbus-remoting-publisher-{Guid.NewGuid():N}")
@@ -61,6 +64,7 @@ public sealed class RemotingEventBusPushIntegrationTests(RocketMQRemotingCluster
             await recorder.WaitForExpectedDeliveriesAsync(TimeSpan.FromSeconds(45), cancellationToken);
             var brokerOffsets = await WaitForMessagesOnAllBrokersAsync(
                 host.Services.GetRequiredService<IRemotingAdmin>(),
+                RocketMQRemotingClusterFixture.PullTopic,
                 TimeSpan.FromSeconds(15),
                 cancellationToken);
             Assert.Equal(3, brokerOffsets.Count(static entry => entry.Value > 0));
@@ -83,10 +87,81 @@ public sealed class RemotingEventBusPushIntegrationTests(RocketMQRemotingCluster
         }
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task PushEventBus_BrokerAssignedPop_DispatchesAndAcknowledgesEveryEvent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var deliveryIds = CreateDeliveryIds();
+        var consumerGroup = $"eventbus-remoting-pop-it-{Guid.NewGuid():N}";
+        var recorder = new RemotingPushDeliveryRecorder(deliveryIds, []);
+        using var settlements = new RemotingSettlementActivityObserver();
+        var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton(recorder);
+        var rocketMQ = builder.Services.AddRocketMQRemoting(options =>
+        {
+            options.NamesrvAddr = fixture.NameServerAddress;
+            options.RequestTimeout = TimeSpan.FromSeconds(10);
+            options.NameServerRequestTimeout = TimeSpan.FromSeconds(10);
+        });
+        rocketMQ
+            .AddRemotingAdmin()
+            .AddRemotingEventBus(
+                configureConsumer: options =>
+                {
+                    options.GroupName = consumerGroup;
+                    options.InitialPosition = ConsumeFromPosition.Beginning;
+                    options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+                    options.MaxConcurrency = 4;
+                    options.PopBatchSize = 4;
+                    options.PopInvisibleDuration = TimeSpan.FromSeconds(30);
+                    options.PopMaxInflightMessagesPerAssignment = 32;
+                    options.LongPollingTimeout = TimeSpan.FromSeconds(3);
+                },
+                configureProducer: options => options.GroupName = $"eventbus-remoting-pop-publisher-{Guid.NewGuid():N}")
+            .AddHandler<RemotingPopPushHandler>();
+
+        using var host = builder.Build();
+        await host.StartAsync(cancellationToken);
+        try
+        {
+            var eventBus = host.Services.GetRequiredService<IEventBus>();
+            await Task.WhenAll(deliveryIds.Select(deliveryId => eventBus.PublishAsync(
+                new RemotingPopIntegrationEvent { DeliveryId = deliveryId },
+                cancellationToken)));
+
+            await recorder.WaitForExpectedDeliveriesAsync(TimeSpan.FromSeconds(45), cancellationToken);
+            await settlements.WaitForDistinctMessagesAsync(
+                "ack",
+                RocketMQRemotingClusterFixture.PopTopic,
+                consumerGroup,
+                deliveryIds.Length,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+            var brokerOffsets = await WaitForMessagesOnAllBrokersAsync(
+                host.Services.GetRequiredService<IRemotingAdmin>(),
+                RocketMQRemotingClusterFixture.PopTopic,
+                TimeSpan.FromSeconds(15),
+                cancellationToken);
+
+            Assert.Equal(3, brokerOffsets.Count(static entry => entry.Value > 0));
+            foreach (var deliveryId in deliveryIds)
+            {
+                Assert.Equal(1, recorder.GetTaggedDeliveryCount(deliveryId));
+            }
+        }
+        finally
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static Guid[] CreateDeliveryIds() => Enumerable.Range(0, 12).Select(static _ => Guid.NewGuid()).ToArray();
 
     private static async Task<IReadOnlyDictionary<string, long>> WaitForMessagesOnAllBrokersAsync(
         IRemotingAdmin admin,
+        string topic,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -94,7 +169,7 @@ public sealed class RemotingEventBusPushIntegrationTests(RocketMQRemotingCluster
         IReadOnlyDictionary<string, long> offsets;
         do
         {
-            offsets = await GetBrokerMaxOffsetsAsync(admin, cancellationToken);
+            offsets = await GetBrokerMaxOffsetsAsync(admin, topic, cancellationToken);
             if (offsets.Count == 3 && offsets.Values.All(static offset => offset > 0))
             {
                 return offsets;
@@ -104,14 +179,15 @@ public sealed class RemotingEventBusPushIntegrationTests(RocketMQRemotingCluster
         }
         while (DateTimeOffset.UtcNow < deadline);
 
-        return await GetBrokerMaxOffsetsAsync(admin, cancellationToken);
+        return await GetBrokerMaxOffsetsAsync(admin, topic, cancellationToken);
     }
 
     private static async Task<IReadOnlyDictionary<string, long>> GetBrokerMaxOffsetsAsync(
         IRemotingAdmin admin,
+        string topic,
         CancellationToken cancellationToken)
     {
-        var queues = await admin.GetMessageQueuesAsync(RocketMQRemotingClusterFixture.Topic, cancellationToken);
+        var queues = await admin.GetMessageQueuesAsync(topic, cancellationToken);
         var queueOffsets = await Task.WhenAll(queues.Select(async queue => new
         {
             queue.BrokerName,

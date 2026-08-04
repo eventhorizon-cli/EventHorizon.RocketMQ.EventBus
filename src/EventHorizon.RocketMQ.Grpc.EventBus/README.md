@@ -9,10 +9,10 @@ publishing and Push consumption to the RocketMQ 5 gRPC client while keeping appl
 serialization transport-neutral in `EventHorizon.RocketMQ.EventBus`.
 
 The first release supports ordinary strongly typed event publishing and Push consumption only. It does not expose
-Pull, Simple, POP, LitePush, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, or runtime
-subscription APIs. Delivery is at least once; application handlers must make their side effects idempotent.
-POP or LitePush can only be added through a separate adapter entry point after the main client exposes a documented
-public hosted-delivery abstraction; they are not modes on this Push API.
+Pull, SimpleConsumer, LitePush, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, or runtime
+subscription APIs. Delivery is at least once; application handlers must make their side effects idempotent. A future
+public delivery model such as LitePush requires a separate adapter entry point and a documented main-client
+hosted-delivery abstraction.
 
 ## Package and dependencies
 
@@ -196,7 +196,10 @@ invokes them sequentially. A message succeeds only after every Handler completes
 | Host shutdown cancels delivery | Cancellation continues to the underlying consumer; no outcome is manufactured |
 
 The gRPC adapter explicitly maps its internal outcome to `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`.
-It does not expose a transport `ConsumeResult` in the EventBus public API.
+`Success` maps to `Success`; EventBus `Retry` and `DeadLetter` both map to gRPC `Failure`. The gRPC Push handler has no
+direct dead-letter result, so a deterministic EventBus `DeadLetter` classification is logged immediately but reaches
+the service-side DLQ only after the consumer group's retry limit. The transport `ConsumeResult` is not exposed in the
+EventBus public API.
 
 Serialization failures and transport send failures are exposed as `EventBusPublishException`. Cancellation requested
 by the caller remains an unwrapped `OperationCanceledException`.
