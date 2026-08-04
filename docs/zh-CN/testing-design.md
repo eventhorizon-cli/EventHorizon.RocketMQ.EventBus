@@ -222,7 +222,7 @@ v<major>.<minor>.<patch>
 4. 两个 Adapter Push 都成功后才为 tag 创建 GitHub Release；该 Release 永远不标记为 prerelease。
 
 发布 workflow 使用不会取消运行中发布的 release concurrency group，避免两个 tag 交错发布。它因为创建 GitHub Release
-需要 `contents: write`。`NUGET_API_KEY` 用于发布 Package，`NUGET_UNLIST_API_KEY` 必须拥有取消列出 Core 的权限。
-NuGet 凭据、按需使用的 Package Source 凭据和任何
-报告 token 都从 GitHub Actions Secret 或执行环境读取，绝不硬编码 secret value。缺少必需 Secret 时，发布操作必须在
-Push 任意 Package 前失败。
+需要 `contents: write`。发布与取消列出 Core 共用一个 `NUGET_API_KEY`；该密钥必须对相应 Package ID 同时拥有这两项
+权限。NuGet 凭据、按需使用的 Package Source 凭据和报告 token 都从 GitHub Actions Secret 或执行环境读取，绝不硬编码
+secret value。缺少必需 Secret 时，发布操作会在 Push 任意 Package 前失败；如果密钥缺少 Package 所有权或操作权限，
+NuGet.org 会在对应的发布或取消列出步骤拒绝请求。
