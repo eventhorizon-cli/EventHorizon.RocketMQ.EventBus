@@ -8,12 +8,13 @@
 publishing and Push consumption to the classic RocketMQ Remoting client while keeping application event contracts,
 routing, and serialization transport-neutral in `EventHorizon.RocketMQ.EventBus`.
 
-The first release supports ordinary strongly typed event publishing and Push consumption only. It does not expose Pull,
-LitePull, POP, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, or runtime subscription APIs.
-Remoting EventBus consumption uses clustering only, never broadcasting. Delivery is at least once; application handlers
-must make their side effects idempotent.
-POP can only be added through a separate adapter entry point after the main client exposes a documented public
-hosted-delivery abstraction; it is not a mode on this Push API.
+The first release supports ordinary strongly typed event publishing and Push consumption only. It does not expose
+standalone Pull, LitePull, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, or runtime subscription
+APIs. Remoting EventBus consumption uses clustering only, never broadcasting. Delivery is at least once; application
+handlers must make their side effects idempotent.
+
+The same Push EventBus supports the main client's client-owned PULL assignments and Broker-owned PULL or POP
+assignments. POP is an internal receive mode, not a separate EventBus API or handler contract.
 
 ## Package and dependencies
 
@@ -55,7 +56,13 @@ Remoting EventBus endpoint.
 
 The Remoting Push consumer is not a server-initiated Broker push protocol. It performs client-initiated long polling.
 This adapter forces `ConsumeMessageBatchSize = 1`, so each transport callback delivers one physical message to the
-EventBus. Receive `BatchSize` may still be greater than one for prefetch efficiency.
+EventBus. `PullBatchSize` and `PopBatchSize` may still be greater than one for receive efficiency.
+
+`QueueAssignmentMode` defaults to `RemotingPushQueueAssignmentMode.Client`, which allocates queues in the client and
+uses PULL. Set it to `Broker` for concurrent clustering consumption when the deployment manages assignment request
+modes on the Broker. Each returned assignment then selects PULL or POP without changing the EventBus handler. For POP,
+processing must finish within `PopInvisibleDuration`; classic Remoting Push does not renew the receipt while a handler
+is active.
 
 ## Programming model
 

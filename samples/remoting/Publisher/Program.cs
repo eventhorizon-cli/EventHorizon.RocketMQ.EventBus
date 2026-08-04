@@ -8,7 +8,7 @@ using EventHorizon.RocketMQ.Remoting;
 using EventHorizon.RocketMQ.Remoting.EventBus;
 using Microsoft.OpenApi;
 
-const string OrdersRegistrationName = "orders";
+const string ordersRegistrationName = "orders";
 
 var builder = WebApplication.CreateBuilder(args);
 var nameserver = builder.Configuration["RocketMQ:NamesrvAddr"] ?? "localhost:9876";
@@ -26,7 +26,7 @@ builder.Services
         options.GroupName = "eventbus-remoting-sample-publisher";
     });
 builder.Services
-    .AddRocketMQRemoting(OrdersRegistrationName, options => options.NamesrvAddr = nameserver)
+    .AddRocketMQRemoting(ordersRegistrationName, options => options.NamesrvAddr = nameserver)
     .AddRemotingEventBus(configureProducer: options => options.GroupName = "eventbus-remoting-orders-publisher");
 
 var app = builder.Build();
@@ -66,7 +66,7 @@ static Task<IResult> PublishDefaultOrderAsync(
 
 static Task<IResult> PublishNamedOrderAsync(
     OrderSubmissionRequest? request,
-    [FromKeyedServices(OrdersRegistrationName)] IEventBus eventBus,
+    [FromKeyedServices(ordersRegistrationName)] IEventBus eventBus,
     CancellationToken cancellationToken) =>
     PublishOrderAsync(
         request,

@@ -8,10 +8,12 @@
 它在 classic RocketMQ Remoting Client 上增加集成事件发布和 Push 消费，同时将应用事件契约、路由和序列化保留在
 传输无关的 `EventHorizon.RocketMQ.EventBus` 中。
 
-首版只支持普通强类型事件发布和 Push 消费，不提供 Pull、LitePull、POP、FIFO、事务、延迟、优先级、批量、
-请求-响应、SQL92 或运行时订阅 API。Remoting EventBus 消费只使用 Clustering，绝不使用 Broadcasting。消息投递至少
-一次，应用 Handler 必须保证业务副作用具备幂等性。
-只有主 Client 公开有文档的 hosted-delivery 抽象后，POP 才能通过独立适配器入口增加；它不会成为当前 Push API 的模式。
+首版只支持普通强类型事件发布和 Push 消费，不提供独立的 Pull、LitePull、FIFO、事务、延迟、优先级、批量、
+请求-响应、SQL92 或运行时订阅 API。Remoting EventBus 只使用 Clustering，不支持 Broadcasting。消息投递至少一次，
+应用 Handler 必须保证业务副作用具备幂等性。
+
+同一个 Push EventBus 既支持由 Client 分配队列并使用 PULL，也支持由 Broker 分配队列后按 assignment 使用 PULL 或
+POP。POP 是内部接收方式，不会增加另一套 EventBus API 或 Handler 契约。
 
 ## Package 与依赖
 
@@ -50,8 +52,13 @@ EventHorizon.RocketMQ.Remoting
 的 Endpoint。
 
 Remoting Push Consumer 不是由 Broker 发起的服务端 Push 协议，而是 Client 发起的长轮询。该适配器会强制设置
-`ConsumeMessageBatchSize = 1`，因此每个传输层回调只向 EventBus 投递一条物理消息。接收 `BatchSize` 仍可大于 1，
-以保留预取效率。
+`ConsumeMessageBatchSize = 1`，因此每个传输层回调只向 EventBus 投递一条物理消息。`PullBatchSize` 和
+`PopBatchSize` 仍可大于 1，以保留接收效率。
+
+`QueueAssignmentMode` 默认是 `RemotingPushQueueAssignmentMode.Client`：由 Client 分配队列并使用 PULL。在 Broker
+端已经配置 assignment request mode 的 Clustering 并发消费环境中，可以改为 `Broker`。Broker 返回的每条
+assignment 会选择 PULL 或 POP，但 EventBus Handler 不变。使用 POP 时，处理必须在 `PopInvisibleDuration` 内完成；
+classic Remoting Push 不会在 Handler 执行期间自动续约 receipt。
 
 ## 编程模型
 

@@ -3,16 +3,17 @@
 [Documentation](README.md) | [简体中文](../zh-CN/consume-result-design.md) |
 [EventBus design](event-bus-design.md)
 
-This document defines how the EventBus adapters choose the transport-level `ConsumeResult` for one delivered
-RocketMQ message. Application handlers do not return `ConsumeResult`; they return `Task`. The EventBus combines route
-resolution, deserialization, and all handler executions into one final result.
+This document defines how the EventBus adapters classify one delivered RocketMQ message and map that classification to
+the transport-level `ConsumeResult`. Application handlers do not return `ConsumeResult`; they return `Task`. EventBus
+combines route resolution, deserialization, and all handler executions into one internal outcome.
 
-Both transport packages define equivalent values:
+The transport packages intentionally expose different values:
 
-- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`
-- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`
+- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`: `Success`, `Failure`
+- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`: `Success`, `Retry`, `DeadLetter`
 
-The adapter returns the value from its own transport package. The decision rules are identical for gRPC and Remoting.
+EventBus applies the same route, payload, and handler classification for both protocols, then maps that internal
+decision to the result supported by the owning transport. The wire-level disposition is therefore not identical.
 
 ## Package boundary
 
@@ -34,9 +35,10 @@ gRPC adapter switch              Remoting adapter switch
 Grpc.Consumer.ConsumeResult      Remoting.Consumer.ConsumeResult
 ```
 
-The internal outcome has the same three semantic states, but it is not a public application contract. Each adapter uses
-an explicit `switch` to map those states to its own transport enum. It must not cast by numeric value, because the two
-main-client packages can evolve independently. Adapter unit tests verify every mapping so a future enum change cannot
+The internal outcome has three semantic states, but it is not a public application contract. Each adapter uses an
+explicit `switch` to map those states to its own transport enum. Remoting preserves all three values. gRPC maps both
+`Retry` and `DeadLetter` to `Failure`, because its public Push handler contract has no direct dead-letter result. The
+adapters must not cast by numeric value; unit tests lock every mapping so independent main-client evolution cannot
 silently alter behavior.
 
 This keeps `EventHorizon.RocketMQ.EventBus` free of gRPC and Remoting references and avoids a dependency from either
@@ -64,8 +66,10 @@ identities.
 | A route resolves but has no dispatchable handler because the internal registration state is inconsistent | `DeadLetter` | This is a non-transient configuration defect; it is also logged as an error |
 | The underlying consumer is stopping and cancels the delivery operation | No adapter result is forced | Cancellation propagates to the consumer so it can perform its normal shutdown and settlement behavior |
 
-The EventBus never returns `Success` after catching an exception. It also does not retry unknown routes or malformed
-payloads, because those failures are deterministic for the current deployment.
+The EventBus never returns `Success` after catching an exception. It classifies unknown routes and malformed payloads
+as deterministic `DeadLetter` outcomes instead of transient `Retry` outcomes. On Remoting this requests direct
+dead-letter delivery. On gRPC the transport can only receive `Failure`, so the service may redeliver the message until
+the consumer group's maximum attempts are exhausted.
 
 ## Processing flow
 
@@ -130,7 +134,8 @@ stop reception and preserve its protocol-specific settlement behavior.
 ## Deserialization failures
 
 Deserialization covers UTF-8 decoding, JSON parsing, object creation, member conversion, and validation of the returned
-event instance. A failure in any of these steps returns `DeadLetter` without invoking an application handler.
+event instance. A failure in any of these steps produces the internal `DeadLetter` outcome without invoking an
+application handler. Transport settlement follows the protocol-specific mapping below.
 
 This rule also applies to a custom `IIntegrationEventSerializer`. Implementations are expected to be deterministic,
 side-effect free, and thread-safe. A serializer that depends on a transient external service is outside the intended
@@ -140,22 +145,26 @@ contract; the EventBus cannot reliably distinguish that failure from an invalid 
 
 `ConsumeResult` expresses the EventBus decision; the underlying client performs the actual Broker operation:
 
-| EventBus result | gRPC Push consumer | Remoting Push consumer |
+| Internal EventBus outcome | gRPC Push consumer | Remoting Push consumer |
 | --- | --- | --- |
 | `Success` | Acknowledges the message | Commits the singleton message |
-| `Retry` | Changes invisibility so the message can be redelivered; the Broker retry policy remains authoritative | Sends the singleton message back for delayed redelivery |
-| `DeadLetter` | Forwards the message to the dead-letter queue | Sends the singleton message directly to the dead-letter queue |
+| `Retry` | Returns `Failure`; the main client schedules redelivery and the service-side retry policy remains authoritative | Returns `Retry` and sends the singleton message back for delayed redelivery |
+| `DeadLetter` | Returns `Failure`; Push exposes no direct dead-letter result, so the service moves the message to DLQ only after the group's maximum attempts | Returns `DeadLetter` and sends the singleton message directly to DLQ |
+
+This distinction is deliberate. `DeadLetter` remains useful inside EventBus for deterministic classification and
+logging, but it is not a promise of immediate gRPC DLQ placement. EventBus does not call an internal forwarding RPC or
+add a public SimpleConsumer-style settlement API to work around the gRPC Push contract.
 
 The Remoting EventBus fixes `ConsumeMessageBatchSize` to `1`, so batch-wide `ConsumeResult` and `AckIndex` rules never
 create partial EventBus outcomes. Network prefetch may still retrieve more than one message, but each message is passed
 to EventBus dispatch separately.
 
-When the delivery attempt has reached the transport's configured maximum, the underlying consumer may move a `Retry`
-result to the dead-letter queue. This does not change the adapter's decision: EventBus still reports and logs `Retry`,
-while the transport owns the final retry/DLQ threshold.
+When the delivery attempt reaches the transport's configured maximum, the underlying client or service may move a
+failed delivery to DLQ. This does not change the EventBus classification or log: the transport owns the final retry and
+DLQ threshold.
 
-If acknowledgement, retry scheduling, or dead-letter forwarding fails, the underlying client may redeliver the message.
-A returned `Success` therefore does not provide exactly-once delivery.
+If acknowledgement, retry scheduling, or Remoting direct dead-letter forwarding fails, the underlying client may
+redeliver the message. A returned `Success` therefore does not provide exactly-once delivery.
 
 ## Logging
 

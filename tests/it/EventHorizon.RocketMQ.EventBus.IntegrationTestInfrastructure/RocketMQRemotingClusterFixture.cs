@@ -36,9 +36,14 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
     private readonly IContainer _brokerC;
 
     /// <summary>
-    /// Gets the Topic prepared on every Broker for the Remoting EventBus suite.
+    /// Gets the Topic prepared on every Broker for client-assigned PULL coverage.
     /// </summary>
-    public static readonly string Topic = $"eventbus-remoting-push-it-{Guid.NewGuid():N}";
+    public static readonly string PullTopic = $"eventbus-remoting-pull-it-{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Gets the Topic prepared on every Broker for Broker-assigned POP coverage.
+    /// </summary>
+    public static readonly string PopTopic = $"eventbus-remoting-pop-it-{Guid.NewGuid():N}";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RocketMQRemotingClusterFixture"/> class.
@@ -76,7 +81,7 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
         await _nameServer.StartAsync().ConfigureAwait(false);
         await Task.WhenAll(_brokerA.StartAsync(), _brokerB.StartAsync(), _brokerC.StartAsync()).ConfigureAwait(false);
         await WaitForBrokersAsync().ConfigureAwait(false);
-        await CreateTopicAsync().ConfigureAwait(false);
+        await CreateTopicsAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -106,7 +111,12 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
             $"namesrvAddr=eventbus-remoting-nameserver:{NameServerPort}\n" +
             $"listenPort={hostPort}\n" +
             "autoCreateTopicEnable=true\n" +
-            "autoCreateSubscriptionGroup=true\n");
+            "autoCreateSubscriptionGroup=true\n" +
+            "timerWheelEnable=true\n" +
+            "serverLoadBalancerEnable=true\n" +
+            "defaultMessageRequestMode=POP\n" +
+            "defaultPopShareQueueNum=-1\n" +
+            "enableRetryTopicV2=false\n");
 
         return new ContainerBuilder(Image)
             .WithNetwork(_network)
@@ -140,7 +150,7 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
             $"The Remoting fixture Brokers did not all register. stdout: {result.Stdout} stderr: {result.Stderr}");
     }
 
-    private async Task CreateTopicAsync()
+    private async Task CreateTopicsAsync()
     {
         var brokers = new[]
         {
@@ -148,36 +158,40 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
             (BrokerB, _brokerBHostPort),
             (BrokerC, _brokerCHostPort),
         };
-        foreach (var (brokerName, port) in brokers)
+        foreach (var topic in new[] { PullTopic, PopTopic })
         {
-            var result = await _brokerA.ExecAsync(
-                [
-                    "sh", "mqadmin", "updateTopic",
-                    "-n", $"eventbus-remoting-nameserver:{NameServerPort}",
-                    "-b", $"{brokerName}:{port}",
-                    "-t", Topic,
-                    "-r", "3",
-                    "-w", "3",
-                    "-a", "+message.type=NORMAL",
-                ])
-                .ConfigureAwait(false);
-            if (result.ExitCode != 0)
+            foreach (var (brokerName, port) in brokers)
             {
-                throw new InvalidOperationException(
-                    $"Unable to create Remoting EventBus Topic on '{brokerName}'. stdout: {result.Stdout} stderr: {result.Stderr}");
+                var result = await _brokerA.ExecAsync(
+                    [
+                        "sh", "mqadmin", "updateTopic",
+                        "-n", $"eventbus-remoting-nameserver:{NameServerPort}",
+                        "-b", $"{brokerName}:{port}",
+                        "-t", topic,
+                        "-r", "3",
+                        "-w", "3",
+                        "-a", "+message.type=NORMAL",
+                    ])
+                    .ConfigureAwait(false);
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Unable to create Remoting EventBus Topic '{topic}' on '{brokerName}'. " +
+                        $"stdout: {result.Stdout} stderr: {result.Stderr}");
+                }
             }
-        }
 
-        await WaitForTopicRouteAsync().ConfigureAwait(false);
+            await WaitForTopicRouteAsync(topic).ConfigureAwait(false);
+        }
     }
 
-    private async Task WaitForTopicRouteAsync()
+    private async Task WaitForTopicRouteAsync(string topic)
     {
         ExecResult result = default;
         for (var attempt = 0; attempt < 60; attempt++)
         {
             result = await _brokerA.ExecAsync(
-                ["sh", "mqadmin", "topicRoute", "-n", $"eventbus-remoting-nameserver:{NameServerPort}", "-t", Topic])
+                ["sh", "mqadmin", "topicRoute", "-n", $"eventbus-remoting-nameserver:{NameServerPort}", "-t", topic])
                 .ConfigureAwait(false);
             if (result.ExitCode == 0 && BrokerNames.All(result.Stdout.Contains))
             {
@@ -188,7 +202,7 @@ public sealed class RocketMQRemotingClusterFixture : IAsyncLifetime
         }
 
         throw new InvalidOperationException(
-            $"The Remoting EventBus Topic route is incomplete. stdout: {result.Stdout} stderr: {result.Stderr}");
+            $"The Remoting EventBus Topic '{topic}' route is incomplete. stdout: {result.Stdout} stderr: {result.Stderr}");
     }
 
 }

@@ -28,9 +28,10 @@ DI 优先 EventBus 层。整体编程风格参考微软已归档的
 - 公开序列化接口，允许应用完全替换序列化与反序列化实现；
 - 与底层客户端一致，同时面向 `net8.0` 和 `net10.0`。
 
-首个版本只发布普通消息，不会封装 Pull、Simple、POP、LitePush、Admin、事务消息、FIFO、定时/延迟消息、
-优先级消息、批量消息、请求-响应、SQL92 过滤或运行时动态订阅/退订 API。消息投递语义仍然是至少一次，
-因此 Handler 必须具备幂等性。
+首个版本只发布普通消息，不提供独立的 Pull、Simple、LitePush、Admin、事务消息、FIFO、定时/延迟消息、
+优先级消息、批量消息、请求-响应、SQL92 过滤或运行时动态订阅/退订 API。Classic Remoting Push 在 Broker
+分配队列时可以内部使用 PULL 或 POP，不需要另建 EventBus 契约。消息投递语义仍然是至少一次，因此 Handler
+必须具备幂等性。
 
 ## 包
 
@@ -133,10 +134,15 @@ public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
 路由，Consumer 会为该 Topic 生成 `*` 订阅，本地 Route Table 仍会精确区分 `null` 与所有字面量 Tag。首版
 EventBus 契约不支持 SQL92 表达式。
 
-Core 有意通过传输层自有的回调创建 Consumer，并让分发逻辑独立于 Push 实现。未来可以增加独立入口，例如
-`AddGrpcLitePushEventBus` 或 `AddRemotingPopEventBus`，但前提是主 Client 先公开有文档的 hosted-delivery 抽象。
-首版不会提前暴露 Consumer Mode 枚举或通用模式开关。POP 只有在路由语义一致时才可以复用 `(Topic, Tag)`；gRPC
-`LiteTopic` 是另一种路由概念，不能塞进 `Tag`。真正增加 Lite 支持时，需要单独定义明确的 Lite 路由契约。
+Core 通过传输层自有的回调创建 Consumer，并让分发逻辑独立于 Push 实现。Classic Remoting POP 是同一个 Push
+Consumer 的内部接收引擎，因此继续使用 `AddRemotingEventBus`、同一个桥接 Handler 和同一张 `(Topic, Tag)`
+路由表。应用可以通过 `RemotingPushConsumerOptions` 请求由 Broker 分配队列；随后，每条 Broker assignment 决定
+主 Client 使用 PULL 还是 POP。EventBus 不修改 Broker 上按 Topic 与 Consumer Group 配置的 request mode，也不接管
+POP receipt 或消息处置。
+
+如果以后支持 gRPC LitePush 这类公开编程模型不同的投递方式，应等主 Client 提供有文档的 hosted-delivery 抽象后，
+再增加独立的适配器入口。gRPC `LiteTopic` 是另一种路由概念，不能塞进 `Tag`；Lite 支持需要单独定义清楚的路由
+契约。
 
 ### Handler
 
@@ -265,6 +271,23 @@ IEventBusBuilder AddGrpcEventBus(
     Action<GrpcPushConsumerOptions>? configureConsumer = null,
     Action<GrpcProducerOptions>? configureProducer = null);
 ```
+
+Remoting 的队列分配通过现有 Push options 配置，不需要增加 EventBus mode：
+
+```csharp
+builder.Services
+    .AddRocketMQRemoting(options => options.NamesrvAddr = "localhost:9876")
+    .AddRemotingEventBus(
+        configureConsumer: options =>
+        {
+            options.GroupName = "ordering-service";
+            options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+        });
+```
+
+主 Client 默认使用 `Client`：由 Client 分配队列，并通过 PULL 接收消息。`Broker` 适用于 EventBus 已支持的
+Clustering 并发消费；Broker 根据运维侧 request-mode 配置，在每条 assignment 中返回 PULL 或 POP。两条路径调用
+相同的 EventBus Handler。POP 使用主 Client 固定的 `PopInvisibleDuration` 处理期限，EventBus 不会另建租期续约循环。
 
 最常见的单委托调用只配置 Push Consumer，不会创建 Producer。发送超时、发送重试、消息大小限制和 Remoting
 Producer Group 等参数通过具名参数 `configureProducer` 配置。即使传入空的非 `null` Producer 委托，也会使用
@@ -507,8 +530,8 @@ eventBusBuilder.AddHandler<OrderSubmittedIntegrationEventHandler>();
 再单独增加对应的注册机制，不为此扩大日常 API。
 
 Remoting 适配器强制设置 `ConsumeMessageBatchSize = 1`，从而把传输层的批量回调约束为 EventBus 每次只处理
-一条消息。底层接收 `BatchSize` 仍可大于 1，以保留预取效率。gRPC Push Consumer 原生就是每条消息调用一次
-Handler。因此两个适配器都保证每次 EventBus 调用只反序列化并分发一条消息。
+一条消息。底层的 `PullBatchSize` 与 `PopBatchSize` 仍可大于 1，以保留接收效率。gRPC Push Consumer 原生就是
+每条消息调用一次 Handler。因此两个适配器都保证每次 EventBus 调用只反序列化并分发一条消息。
 
 ### 自定义序列化器
 
@@ -641,9 +664,9 @@ Body 前失败，并且无法生成日志视图，`Payload` 为 null。日志格
 
 ## 投递与失败语义
 
-EventBus 与主客户端组成的完整处理路径会为每次完成的投递尝试给出以下最终处置之一：
+EventBus 会为每次完成的分发尝试给出以下内部结果：
 
-| 情况 | 最终处置 |
+| 情况 | EventBus 结果 |
 | --- | --- |
 | 路由匹配、反序列化成功且全部 Handler 成功 | `Success` |
 | Handler 或它的依赖抛出异常 | `Retry` |
@@ -651,6 +674,10 @@ EventBus 与主客户端组成的完整处理路径会为每次完成的投递�
 | 反序列化失败，或序列化器返回无效事件 | `DeadLetter` |
 | 收到的 Topic 与 Tag 没有匹配事件 | `DeadLetter` |
 | Host 停止并取消本次投递 | 继续传播取消，不强制生成新结果 |
+
+协议适配器再把内部分类映射到主 Client 的结果。Remoting 保留三个结果；gRPC 将 `Retry` 和 `DeadLetter` 都映射为
+`Failure`，消息只有在达到 Consumer Group 的重试上限后才由服务端转入 DLQ。完整映射见
+[`ConsumeResult` 处理设计](consume-result-design.md)。
 
 两个适配器都不提供 exactly-once 投递。重试可能与忽略取消信号的 Handler 重叠；多个 Handler 中已经执行成功的
 部分也可能再次执行。消费端必须保证副作用幂等。
@@ -675,10 +702,11 @@ NameServer 和每个 Broker 直接暴露给测试进程，并使用宿主机可�
 因此不会用一个带模式分支的 fixture 伪装成同一种拓扑。
 
 Unit Tests 在不使用 Docker 的情况下覆盖 Core 和两个适配器。Compatibility Tests 同时引用三个生产项目，验证
-API 对称性、独立的传输层枚举、Core 自有泛型 registration accessor 边界隔离，以及默认/named DI 行为。每个
-Integration Test Suite 都在 Generic Host 中启动 Producer 和 Push Consumer，并发发布十二条带 Tag 和十二条无 Tag 的事件，
-验证匹配 Handler 对每个事件只观察到一次，并确认三个 Broker 都存储了消息。其余确定性的结果映射、Retry、
-DeadLetter、named registration 和生命周期分支由 Unit Tests 覆盖。
+API 对称性、独立的传输层枚举与映射、Core 自有泛型 registration accessor 边界隔离，以及默认/named DI 行为。每个
+Integration Test Suite 都在 Generic Host 中启动 Producer 和 Push Consumer，并发发布十二条带 Tag 和十二条无 Tag 的
+事件，验证匹配 Handler 对每个事件只观察到一次，并确认三个 Broker 都存储了消息。Remoting Suite 还会使用独立的
+Topic 与 Group，通过成功的 `ack` settlement Activity 验证 Broker 分配的 POP；原有流程继续覆盖默认的 Client
+分配 PULL。其余确定性的结果映射、Retry、DeadLetter、named registration 和生命周期分支由 Unit Tests 覆盖。
 
 Samples 沿用主项目按协议组织的方式。每个适配器分别提供 Web API Publisher 与 Generic Host Consumer 示例，让未使用
 的传输角色确实不存在这一行为保持可见；默认 registration 和 `orders` named registration 放在同一个协议 sample 中，
@@ -753,9 +781,9 @@ Samples 沿用主项目按协议组织的方式。每个适配器分别提供 We
 
 仓库遵循主客户端的仓库约定：C# 12、nullable reference types、完整的公开 API XML 文档、xUnit v3 单元
 测试、覆盖两种协议的 Docker 集成测试、可运行的 Consumer 和 Web API Publisher 示例、格式检查/构建/测试 CI、NuGet 包发布、
-符号包和双语包内 README。gRPC 包内 README 会说明仅通过 Proxy 连接及客户端长轮询；Remoting 包内 README 会说明
-NameServer 路由发现、直连 Broker 广播地址、客户端长轮询和仅支持集群消费模式。Core 包内 README 保持协议无关，
-并链接到两个适配器。本仓库使用 MIT License，而不是主客户端的 Apache-2.0 License。
+符号包和双语包内 README。gRPC 包内 README 会说明仅通过 Proxy 连接及 Client 发起的长轮询；Remoting 包内 README
+会说明 NameServer 路由发现、直连 Broker 公布地址、Client 发起的 PULL/POP 长轮询和仅支持集群消费模式。Core 包内
+README 保持协议无关，并链接到两个适配器。本仓库使用 MIT License，而不是主客户端的 Apache-2.0 License。
 
 ## 设计决策
 
@@ -765,7 +793,8 @@ NameServer 路由发现、直连 Broker 广播地址、客户端长轮询和仅�
    Topic 只要包含无 Tag 路由，Consumer 就使用 `*` 过滤表达式。
 3. 每个具体集成事件类型都必须提供公开无参构造函数。注册过程使用它发现路由，无需 Attribute、static
    abstract 成员或应用服务。
-4. Handler 失败时请求重试；反序列化失败和未知路由直接进入 DLQ，不确认成功，也不无限重试。
+4. Handler 失败时产生内部 `Retry`；反序列化失败和未知路由产生内部 `DeadLetter`。Remoting 可以请求立即进入
+   DLQ；gRPC 会把两类失败都映射为 `Failure`，由服务端重试次数与 DLQ 阈值决定最终处置。
 5. EventBus 每次调用只反序列化并分发一条消息，同时保留可配置的传输预取和消费并发度；Remoting Handler
    批量回调固定为 1。
 6. 公开命名使用 `EventHorizon.RocketMQ.EventBus`、`IntegrationEvent` 和
@@ -777,7 +806,8 @@ NameServer 路由发现、直连 Broker 广播地址、客户端长轮询和仅�
    路由、Handler、生命周期、序列化器和实际配置的传输角色。
 9. 三个 NuGet 包使用同一个版本和同一个发布 Tag。Core 最先推送，作为两个适配器的未列出传递依赖；随后立即推送
    适配器。
-10. Remoting EventBus 消费只使用 `Clustering`；首版不支持 `Broadcasting`。
+10. Remoting EventBus 消费只使用 `Clustering`，首版不支持 `Broadcasting`。同一个 Push Consumer 可以使用 Client
+    分配的 PULL，或 Broker 分配的 PULL/POP，不会改变 EventBus API。
 11. 两个适配器默认通过 `Microsoft.Extensions.Logging` 记录发布和消费结果；发布和 Consumer 最终结果会用 JSON
     格式的结构化字段记录完整 `Payload`，应用必须用日志分类过滤规则控制这类可能包含敏感信息的输出。
 12. 两个协议的 IT 都使用临时的三 Broker Testcontainers fixture。固定端口的多 Broker Compose 环境与 IT 相互

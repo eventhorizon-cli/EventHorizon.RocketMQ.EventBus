@@ -27,7 +27,7 @@ public sealed class RemotingEventBusConsumerConfigurationTests
     }
 
     [Fact]
-    public async Task FirstHandler_ForcesOneMessageDispatchWithoutChangingReceivePrefetch()
+    public async Task FirstHandler_ConfiguredPullPrefetch_PreservesPullBatchSizeAndForcesOneMessageDispatch()
     {
         var services = new ServiceCollection();
         RemotingPushConsumerOptions? capturedOptions = null;
@@ -36,7 +36,7 @@ public sealed class RemotingEventBusConsumerConfigurationTests
             .AddRemotingEventBus(options =>
             {
                 options.GroupName = "orders-consumer";
-                options.BatchSize = 48;
+                options.PullBatchSize = 48;
                 options.ConsumeMessageBatchSize = 12;
             })
             .AddHandler<RemotingTestHandler>();
@@ -46,8 +46,30 @@ public sealed class RemotingEventBusConsumerConfigurationTests
         _ = provider.GetRequiredService<IRemotingPushConsumer>();
 
         var options = Assert.IsType<RemotingPushConsumerOptions>(capturedOptions);
-        Assert.Equal(48, options.BatchSize);
+        Assert.Equal(48, options.PullBatchSize);
         Assert.Equal(1, options.ConsumeMessageBatchSize);
+    }
+
+    [Fact]
+    public async Task FirstHandler_BrokerQueueAssignment_PreservesConfiguredAssignmentMode()
+    {
+        var services = new ServiceCollection();
+        RemotingPushConsumerOptions? capturedOptions = null;
+        services
+            .AddRocketMQRemoting(options => options.NamesrvAddr = "127.0.0.1:9876")
+            .AddRemotingEventBus(options =>
+            {
+                options.GroupName = "orders-consumer";
+                options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+            })
+            .AddHandler<RemotingTestHandler>();
+        services.PostConfigureAll<RemotingPushConsumerOptions>(options => capturedOptions = options);
+
+        await using var provider = services.BuildServiceProvider();
+        _ = provider.GetRequiredService<IRemotingPushConsumer>();
+
+        var options = Assert.IsType<RemotingPushConsumerOptions>(capturedOptions);
+        Assert.Equal(RemotingPushQueueAssignmentMode.Broker, options.QueueAssignmentMode);
     }
 
     [Fact]

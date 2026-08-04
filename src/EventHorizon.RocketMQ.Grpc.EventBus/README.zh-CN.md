@@ -8,10 +8,9 @@
 RocketMQ 5 gRPC Client 上增加集成事件发布和 Push 消费，同时将应用事件契约、路由和序列化保留在传输无关的
 `EventHorizon.RocketMQ.EventBus` 中。
 
-首版只支持普通强类型事件发布和 Push 消费，不提供 Pull、Simple、POP、LitePush、FIFO、事务、延迟、优先级、批量、
-请求-响应、SQL92 或运行时订阅 API。消息投递至少一次，应用 Handler 必须保证业务副作用具备幂等性。
-只有主 Client 公开有文档的 hosted-delivery 抽象后，POP 或 LitePush 才能通过独立的适配器入口增加；它们不会成为
-当前 Push API 的模式。
+首版只支持普通强类型事件发布和 Push 消费，不提供 Pull、SimpleConsumer、LitePush、FIFO、事务、延迟、优先级、
+批量、请求-响应、SQL92 或运行时订阅 API。消息投递至少一次，应用 Handler 必须保证业务副作用具备幂等性。以后如需
+支持 LitePush 这类新的公开投递模型，应增加独立的适配器入口，并以主 Client 提供的正式 hosted-delivery 抽象为边界。
 
 ## Package 与依赖
 
@@ -187,8 +186,10 @@ Envelope 或 .NET type name，`Topic` 与 `Tag` 也会从 Body 排除。启动�
 | 路由未知或 Payload 无法反序列化 | `DeadLetter` |
 | Host 停止取消本次投递 | 取消继续传给底层 Consumer，不制造新的结果 |
 
-gRPC 适配器会把内部结果显式映射到 `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`，不会在 EventBus 公开 API
-中暴露传输层 `ConsumeResult`。
+gRPC 适配器会把内部结果显式映射到 `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`：`Success` 映射为
+`Success`，EventBus 的 `Retry` 和 `DeadLetter` 都映射为 gRPC `Failure`。gRPC Push Handler 没有直接死信结果；
+EventBus 会立即记录确定性的 `DeadLetter` 分类，但消息只有在达到 Consumer Group 的重试上限后才由服务端转入
+DLQ。EventBus 公开 API 不会暴露传输层 `ConsumeResult`。
 
 序列化失败和传输发送失败统一抛出 `EventBusPublishException`。调用方主动取消时，仍直接抛出未包装的
 `OperationCanceledException`。

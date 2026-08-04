@@ -81,7 +81,7 @@ internal sealed class GrpcIntegrationEventBusHandler<TAnchorHandler>(
                 Stopwatch.GetElapsedTime(startedAt),
                 body);
 
-            return ConsumeResult.Retry;
+            return ConsumeResult.Failure;
         }
     }
 }

@@ -28,9 +28,10 @@ The first release is intentionally small:
 - allow applications to replace serialization and deserialization through a public interface; and
 - target `net8.0` and `net10.0`, matching the underlying client.
 
-The first release publishes ordinary messages only. It does not wrap Pull, Simple, POP, LitePush, Admin,
+The first release publishes ordinary messages only. It does not expose standalone Pull, Simple, LitePush, Admin,
 transactional, FIFO, timed/delay, priority, batch, request-reply, SQL92 filtering, or runtime subscribe/unsubscribe APIs.
-Event delivery remains at least once, so handlers must be idempotent.
+Classic Remoting Push may use PULL or POP internally for Broker-owned assignments without creating another EventBus
+contract. Event delivery remains at least once, so handlers must be idempotent.
 
 ## Packages
 
@@ -139,11 +140,15 @@ local route table still distinguishes `null` from every literal Tag. SQL92 expre
 EventBus contract.
 
 Core deliberately keeps consumer creation behind a transport-owned callback and keeps dispatch independent from the
-Push implementation. A future adapter can add a separate entry point such as `AddGrpcLitePushEventBus` or
-`AddRemotingPopEventBus` only after the main client exposes a documented public hosted-delivery abstraction. The first
-release does not expose a consumer-mode enum or a generic mode switch. POP can reuse `(Topic, Tag)` only when its
-routing contract matches; gRPC `LiteTopic` is a different routing concept and must not be encoded into `Tag`. Lite
-support requires its own explicit routing contract.
+Push implementation. Classic Remoting POP is an internal receive engine of the same Push consumer, so it uses
+`AddRemotingEventBus`, the same bridge handler, and the same `(Topic, Tag)` route table. Applications may request
+Broker-owned queue assignment through `RemotingPushConsumerOptions`; each Broker assignment then determines whether
+the main client receives with PULL or POP. EventBus does not configure the Broker's topic-and-group request mode and
+does not own POP receipts or settlement.
+
+A genuinely different public delivery model, such as gRPC LitePush, requires a separate adapter entry point after the
+main client exposes a documented hosted-delivery abstraction. gRPC `LiteTopic` is a different routing concept and must
+not be encoded into `Tag`; Lite support requires its own explicit routing contract.
 
 ### Handlers
 
@@ -279,6 +284,24 @@ IEventBusBuilder AddGrpcEventBus(
     Action<GrpcPushConsumerOptions>? configureConsumer = null,
     Action<GrpcProducerOptions>? configureProducer = null);
 ```
+
+Remoting queue assignment is configured through the existing Push options rather than an EventBus mode:
+
+```csharp
+builder.Services
+    .AddRocketMQRemoting(options => options.NamesrvAddr = "localhost:9876")
+    .AddRemotingEventBus(
+        configureConsumer: options =>
+        {
+            options.GroupName = "ordering-service";
+            options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+        });
+```
+
+`Client`, the main-client default, performs client-side queue allocation and uses PULL. `Broker` is valid for the
+EventBus clustering and concurrent-consumption contract; the Broker returns PULL or POP in each assignment according
+to its administrative request-mode configuration. Both paths invoke the same EventBus handler. POP uses the main
+client's fixed `PopInvisibleDuration` deadline and does not add a lease-renewal loop to EventBus.
 
 The common one-delegate call configures the Push consumer and does not create a Producer. Producer settings such as
 send timeout, retry count, message-size limit, and the Remoting producer group use the named `configureProducer`
@@ -541,7 +564,8 @@ trimming or Native AOT registration mechanism can be added later if there is a c
 this everyday API.
 
 The Remoting adapter forces `ConsumeMessageBatchSize = 1`, so its batch-shaped transport callback hands the
-EventBus exactly one message. The lower-level receive `BatchSize` may remain greater than one for prefetch efficiency.
+EventBus exactly one message. The lower-level `PullBatchSize` and `PopBatchSize` may remain greater than one for receive
+efficiency.
 The gRPC Push consumer already invokes its handler once per message. Both adapters therefore deserialize and dispatch
 one message per EventBus invocation.
 
@@ -687,10 +711,9 @@ used to configure the consumer. A registration without handlers has no Consumer 
 
 ## Delivery and failure semantics
 
-The complete EventBus and main-client processing path gives each completed delivery attempt one of these effective
-dispositions:
+EventBus classifies each completed dispatch attempt with one of these internal outcomes:
 
-| Condition | Effective disposition |
+| Condition | EventBus outcome |
 | --- | --- |
 | Route resolves, deserialization succeeds, and every handler succeeds | `Success` |
 | A handler or its dependency throws | `Retry` |
@@ -698,6 +721,10 @@ dispositions:
 | Deserialization fails or the serializer returns an invalid event | `DeadLetter` |
 | No registered event matches the received topic and tag | `DeadLetter` |
 | Host shutdown cancels the delivery | Propagate cancellation; do not force a new result |
+
+The protocol adapter maps this classification to its main client's result. Remoting preserves all three values. gRPC
+maps both `Retry` and `DeadLetter` to `Failure`; the service moves the message to DLQ only after the consumer group's
+retry limit. The [`ConsumeResult` handling design](consume-result-design.md) defines the complete mapping.
 
 Neither adapter provides exactly-once delivery. A retry can overlap a handler that ignored cancellation, and dispatch
 to multiple handlers can repeat handlers that already completed. Consumers must make side effects idempotent.
@@ -722,12 +749,13 @@ exposes NameServer and every Broker directly to the test process with host-reach
 fixtures separate avoids pretending those incompatible address models are one topology.
 
 Unit tests cover Core and each adapter without Docker. Compatibility tests reference all three production projects and
-verify API symmetry, independent transport enums, Core-owned generic registration-accessor boundary isolation, and
-default/named DI behavior.
-Each integration suite starts a Producer and Push Consumer in a Generic Host, concurrently publishes twelve tagged and
-twelve untagged events, verifies the matching Handler observes each event exactly once, and confirms all three Brokers
-stored messages. Unit tests own the remaining
-deterministic result-mapping, retry, dead-letter, named-registration, and lifecycle branches.
+verify API symmetry, independent transport enums and mappings, Core-owned generic registration-accessor boundary
+isolation, and default/named DI behavior. Each integration suite starts a Producer and Push Consumer in a Generic Host,
+concurrently publishes twelve tagged and twelve untagged events, verifies the matching Handler observes each event
+exactly once, and confirms all three Brokers stored messages. The Remoting suite also uses a separate Topic and group
+to verify Broker-assigned POP through successful `ack` settlement activities; its original workflow retains the
+default client-assigned PULL path. Unit tests own the remaining deterministic result-mapping, retry, dead-letter,
+named-registration, and lifecycle branches.
 
 Samples mirror the main repository's protocol-first layout. Each adapter has a Web API Publisher and a Generic Host
 Consumer sample, so the absence of the unused transport role is visible. Default and `orders` named registrations live
@@ -806,9 +834,9 @@ The repository follows the main client's repository conventions: C# 12, nullable
 documentation for public APIs, xUnit v3 unit tests, Docker-backed integration tests for both transports, runnable
 Consumer and Web API Publisher samples, format/build/test CI, package publishing, symbols, and bilingual package
 READMEs. The gRPC
-package README describes its Proxy-only connection path and client-side long polling. The Remoting package README
-describes NameServer route discovery, direct connections to advertised Brokers, client-side long polling, and the
-clustering-only consumption model. The Core package README remains transport-neutral and links to both adapters.
+package README describes its Proxy-only connection path and client-initiated long polling. The Remoting package README
+describes NameServer route discovery, direct connections to advertised Brokers, client-initiated PULL/POP long polling,
+and the clustering-only consumption model. The Core package README remains transport-neutral and links to both adapters.
 This repository uses the MIT License rather than the main client's Apache-2.0 license.
 
 ## Design decisions
@@ -819,8 +847,9 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
    constructor; they are not included in the JSON payload. A topic with any untagged route uses a `*` consumer filter.
 3. Every concrete integration-event type has a public parameterless constructor. Registration uses it to discover the
    route without attributes, static abstract members, or application services.
-4. Handler failures request retry. Deserialization failures and unknown routes go directly to DLQ rather than being
-   acknowledged or retried indefinitely.
+4. Handler failures produce the internal `Retry` outcome. Deserialization failures and unknown routes produce the
+   internal `DeadLetter` outcome. Remoting can request immediate DLQ delivery; gRPC maps both failure outcomes to
+   `Failure` and relies on the service-side retry/DLQ threshold.
 5. The EventBus deserializes and dispatches one message per invocation while retaining configurable transport prefetch
    and consumer concurrency. Remoting handler batches are fixed at one.
 6. Public names use `EventHorizon.RocketMQ.EventBus`, `IntegrationEvent`, and
@@ -833,7 +862,8 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
    configured transport roles.
 9. All three NuGet packages use one version and one release tag. Core is pushed first as an unlisted transitive
    dependency of both adapters; adapters are pushed immediately afterward.
-10. Classic Remoting EventBus consumption uses clustering only; broadcasting is outside the first release.
+10. Classic Remoting EventBus consumption uses clustering only; broadcasting is outside the first release. Its Push
+    consumer may use client-owned PULL assignments or Broker-owned PULL/POP assignments without changing EventBus APIs.
 11. Both adapters log publish and consume outcomes by default through Microsoft logging. Publish and final Consumer
     outcomes include the full `Payload` as a JSON-formatted structured field; category filters control this potentially
     sensitive output.

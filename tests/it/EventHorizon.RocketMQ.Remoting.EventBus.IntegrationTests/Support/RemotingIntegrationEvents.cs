@@ -6,7 +6,7 @@ namespace EventHorizon.RocketMQ.Remoting.EventBus.IntegrationTests.Support;
 internal sealed class RemotingTaggedIntegrationEvent : IntegrationEvent
 {
     public RemotingTaggedIntegrationEvent()
-        : base(RocketMQRemotingClusterFixture.Topic, "eventbus-tagged")
+        : base(RocketMQRemotingClusterFixture.PullTopic, "eventbus-tagged")
     {
     }
 
@@ -16,7 +16,17 @@ internal sealed class RemotingTaggedIntegrationEvent : IntegrationEvent
 internal sealed class RemotingUntaggedIntegrationEvent : IntegrationEvent
 {
     public RemotingUntaggedIntegrationEvent()
-        : base(RocketMQRemotingClusterFixture.Topic)
+        : base(RocketMQRemotingClusterFixture.PullTopic)
+    {
+    }
+
+    public Guid DeliveryId { get; init; }
+}
+
+internal sealed class RemotingPopIntegrationEvent : IntegrationEvent
+{
+    public RemotingPopIntegrationEvent()
+        : base(RocketMQRemotingClusterFixture.PopTopic, "eventbus-pop")
     {
     }
 

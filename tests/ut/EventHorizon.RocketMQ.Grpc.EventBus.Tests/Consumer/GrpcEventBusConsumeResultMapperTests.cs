@@ -4,9 +4,9 @@ public sealed class GrpcEventBusConsumeResultMapperTests
 {
     [Theory]
     [InlineData("Success", ConsumeResult.Success)]
-    [InlineData("Retry", ConsumeResult.Retry)]
-    [InlineData("DeadLetter", ConsumeResult.DeadLetter)]
-    public void Map_MapsEveryCoreDispatchOutcomeToTheMatchingGrpcConsumeResult(
+    [InlineData("Retry", ConsumeResult.Failure)]
+    [InlineData("DeadLetter", ConsumeResult.Failure)]
+    public void Map_KnownEventBusOutcome_ReturnsSupportedGrpcResult(
         string outcomeName,
         ConsumeResult expected)
     {
@@ -24,7 +24,7 @@ public sealed class GrpcEventBusConsumeResultMapperTests
     }
 
     [Fact]
-    public void Map_RejectsAnUnknownCoreDispatchOutcome()
+    public void Map_UnknownEventBusOutcome_ThrowsArgumentOutOfRangeException()
     {
         var outcomeType = typeof(IEventBus).Assembly.GetType(
             "EventHorizon.RocketMQ.EventBus.Internal.Dispatching.EventBusDispatchOutcome",

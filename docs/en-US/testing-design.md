@@ -59,7 +59,8 @@ Adapter and compatibility tests cover:
   default or named EventBus registration;
 - private-token isolation of routes, serializers, and distinct Handler types across registrations;
 - a fixed Scoped protocol bridge and exactly one main-client-owned async scope per delivery;
-- explicit mapping of every internal outcome to each independently defined transport `ConsumeResult`;
+- explicit mapping of every internal outcome to each independently defined transport `ConsumeResult`, including gRPC
+  `Retry`/`DeadLetter` convergence on `Failure`;
 - Remoting non-success send statuses becoming publish failures; and
 - cancellation-token propagation and subscription-summary startup behavior.
 
@@ -102,7 +103,8 @@ Remoting IT process
 
 The fixture maps NameServer and all Broker ports dynamically. Each Broker advertises a host-reachable address and its
 mapped port, because the production Remoting client follows the returned route and connects directly to that Broker.
-No Proxy is required for Remoting IT.
+The fixture enables Broker-side assignment and POP, but keeps PULL and POP workflows on separate Topics and consumer
+groups. No Proxy is required for Remoting IT.
 
 The two fixtures remain separate because a Proxy can resolve Docker aliases that a host process cannot, while
 `127.0.0.1` routes suitable for the host cannot identify three peer containers from inside a Proxy. Shared lifecycle
@@ -110,12 +112,16 @@ helpers may be extracted, but there is no public mode-switched fixture with inva
 
 ## Current integration coverage
 
-Each protocol suite starts a Generic Host with one EventBus Producer and one Push Consumer. It concurrently publishes
-twelve tagged and twelve untagged events to one fixture-created Topic, verifies every event ID reaches only its matching
-typed Handler exactly once, and confirms all three Brokers stored messages. This exercises public registration,
-Host-owned transport lifecycle, the
-Newtonsoft.Json body path, literal Tag routing, the wildcard subscription needed for an untagged route, and Remoting's
-one-message dispatch constraint.
+Each protocol suite starts a Generic Host with one EventBus Producer and one Push Consumer. The default workflows
+concurrently publish twelve tagged and twelve untagged events to one fixture-created Topic, verify every event ID
+reaches only its matching typed Handler exactly once, and confirm all three Brokers stored messages. This exercises
+public registration, Host-owned transport lifecycle, the Newtonsoft.Json body path, literal Tag routing, the wildcard
+subscription needed for an untagged route, and Remoting's one-message dispatch constraint.
+
+The Remoting suite also runs a separate Broker-assigned POP workflow on its own Topic and consumer group. It verifies
+typed EventBus delivery and waits for successful `ack` settlement activities emitted only after real POP `ACK_MESSAGE`
+responses. A PULL regression would emit offset `commit`, not `ack`, and the test would fail. Client assignment remains
+the default and is covered by the original PULL workflow.
 
 The fixtures create unique Topics and Groups, wait on observable conditions with bounded timeouts, and own all Docker
 resources. Deterministic unit tests cover result mapping, malformed payloads, unknown routes, retry classification,
