@@ -236,13 +236,13 @@ Publication is deliberately ordered:
 
 1. Push the Core package.
 2. Push the gRPC and Remoting adapter packages immediately; both declare the same-version Core dependency.
-3. Unlist Core from NuGet search while retaining exact-version dependency restore.
-4. Create a GitHub Release for the tag only after both adapter pushes succeed; the Release is never marked as a prerelease.
+3. Create a GitHub Release for the tag only after all three package pushes succeed; the Release is never marked as a
+   prerelease.
 
 The publish workflow uses a non-cancelling release concurrency group, so two tags cannot interleave publication. It
-needs `contents: write` because it creates the GitHub release. One `NUGET_API_KEY` both publishes the three packages
-and unlists Core, so its NuGet.org scope must authorize both operations for the corresponding package IDs.
-Package-source credentials where needed, and any reporting token are read from GitHub Actions secrets or the execution
-environment; no secret value is hard-coded. A missing required secret fails the publish operation before any package
-push. NuGet.org still rejects an API key whose package ownership or operation scope is insufficient at the affected
-publish or unlist step.
+needs `contents: write` because it creates the GitHub release. One `NUGET_API_KEY` publishes all three packages, so its
+NuGet.org scope must authorize package publication for the three corresponding package IDs. Package-source
+credentials where needed, and any reporting token are read from GitHub Actions secrets or the execution environment;
+no secret value is hard-coded. A missing required secret fails the publish operation before any package push.
+NuGet.org still rejects an API key whose package ownership or publication scope is insufficient at the affected push
+step.

@@ -7,53 +7,36 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-这是一个面向 [EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ) 的强类型 EventBus
-扩展，集成事件的使用方式参考微软 eShop 项目的实践。
+这是 [EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ) 的强类型 EventBus。RocketMQ 5
+gRPC 与 classic Remoting 使用相同的事件、处理器、路由、序列化和托管模型，同时保留彼此独立的协议适配器。
 
-它在 RocketMQ 5 gRPC 与 classic Remoting 之上提供统一的应用层模型，同时将两种协议保留在独立 Package 中。
+## 选择适配器
 
-## 范围
-
-首版支持：
-
-- 发布强类型集成事件，并且只通过 Push Consumer 消费；
-- 每次投递只路由和反序列化一条物理 RocketMQ 消息；
-- 直接注册 Handler，或通过确定性的程序集扫描注册；
-- 通过 Microsoft DI 解析 Handler，默认生命周期为 `Scoped`；
-- 保留主 Client 的默认注册和 named/keyed 注册模型；
-- 通过主 Client 的 `IHostedService` 注册接入 Generic Host；
-- 默认使用 Newtonsoft.Json，并允许按 registration 替换序列化器；
-- 输出结构化的发布、消费、结果和订阅汇总日志；
-- 提供 Unit Tests、协议专用的三 Broker Integration Tests、可运行 Consumer 与 Web API Publisher samples，以及独立的 Compose 环境。
-
-首版不提供独立的 Pull、Simple、LitePush、SQL92、运行时订阅、事务或顺序消息、延迟消息、批量发布、请求-响应和
-exactly-once 投递。Classic Remoting Push 在 Broker 分配队列时可以内部使用 PULL 或 POP，不会改变 EventBus API 和
-Handler。后续如需增加新的公开投递模型，主 Client 必须先提供合适的 hosted-delivery 抽象。Handler 的业务副作用
-必须具备幂等性。
-
-## 安装
-
-| Package | 职责 |
+| 包 | 适用场景 |
 | --- | --- |
-| `EventHorizon.RocketMQ.Remoting.EventBus` | classic Remoting Producer 与 Clustering Push Consumer 适配器 |
-| `EventHorizon.RocketMQ.Grpc.EventBus` | RocketMQ 5 gRPC Producer 与 Push Consumer 适配器 |
+| [`EventHorizon.RocketMQ.Grpc.EventBus`](https://www.nuget.org/packages/EventHorizon.RocketMQ.Grpc.EventBus) | 通过 RocketMQ 5 Proxy 使用 gRPC 的服务 |
+| [`EventHorizon.RocketMQ.Remoting.EventBus`](https://www.nuget.org/packages/EventHorizon.RocketMQ.Remoting.EventBus) | 通过 NameServer 发现 Broker 并使用 classic Remoting 的服务 |
 
-安装实际使用的 RocketMQ 协议适配器即可。两个适配器会传递还原共享的 EventBus 实现，并且不会相互引用。该支持包会
-从 NuGet 搜索中取消列出，不作为用户直接安装的入口。
+应用只需安装与所用协议对应的适配器。两个适配器彼此独立，不会额外引入另一种协议的客户端。
 
-## 使用方式
+## 支持范围
 
-公开契约位于 `EventHorizon.RocketMQ.EventBus.Abstractions`、`.Events`、`.Exceptions` 和 `.Serialization` 命名空间；
-注册扩展位于 Core 或所选适配器的根命名空间。
+- 强类型事件发布与 Push 消费
+- 精确的 `(Topic, Tag)` 路由，包括无 Tag 消息
+- 直接注册处理器，或按确定顺序扫描程序集
+- Microsoft 依赖注入与 Generic Host 生命周期
+- 默认注册和 named/keyed 注册
+- 默认使用 Newtonsoft.Json，并可为每个注册项替换序列化器
+- 结构化的发布、消费、结果与订阅汇总日志
 
-```csharp
-using EventHorizon.RocketMQ.EventBus;
-using EventHorizon.RocketMQ.EventBus.Abstractions;
-using EventHorizon.RocketMQ.EventBus.Events;
-using EventHorizon.RocketMQ.Grpc.EventBus;
-```
+消息采用至少一次（at-least-once）投递，处理器必须保证业务副作用幂等。当前 EventBus 不提供独立 Pull、SimpleConsumer、
+LitePull、LitePush、FIFO、事务、延迟、优先级、批量、请求-响应、SQL92 和运行时订阅 API。
 
-事件继承 `IntegrationEvent`，并把稳定路由传入基类构造函数：
+Classic Remoting Push 在 Broker 分配队列时可以内部使用 PULL 或 POP；这一选择不会改变 EventBus API 和处理器契约。
+
+## 快速开始
+
+定义带有固定路由的事件：
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
@@ -65,24 +48,9 @@ public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
 
     public Guid OrderId { get; init; }
 }
-
-public sealed class InventorySnapshotIntegrationEvent : IntegrationEvent
-{
-    public InventorySnapshotIntegrationEvent()
-        : base("inventory-snapshots")
-    {
-    }
-
-    public int Available { get; init; }
-}
 ```
 
-`Topic` 直接对应 RocketMQ Topic。非 `null` 的 `Tag` 对应一个字面量 Tag；`null` 表示发布不带 Tag 的消息。精确且按序号
-比较的 `(Topic, Tag)` 路由只会选择一种事件类型；该事件类型可以注册多个 Handler，在一次反序列化后按顺序执行。
-`*` 是 Consumer FilterExpression，不能作为事件 Tag。如果某个 Topic 存在无 Tag 路由，Consumer 会使用 `*` 订阅，
-本地路由仍然精确匹配 `(Topic, null)`。两个路由值都不会写入默认 JSON Body。
-
-Handler 使用 `Task`，普通的异步应用代码无需额外约定：
+实现对应的处理器：
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEventHandler
@@ -97,7 +65,7 @@ public sealed class OrderSubmittedIntegrationEventHandler
 }
 ```
 
-注册 gRPC EventBus 并扫描应用程序集：
+注册 gRPC 适配器，并扫描应用程序集：
 
 ```csharp
 builder.Services
@@ -108,31 +76,40 @@ builder.Services
     .AddHandlersFromAssemblyOf<Program>();
 ```
 
-`AddHandler<THandler>()` 注册一个具体 Handler type。`AddHandlersFromAssemblyOf<TMarker>()` 和
-`AddHandlersFromAssembly(assembly)` 在启动阶段发现 Handler；三种方法都接受可选的 `ServiceLifetime`。在一个
-`IServiceCollection` 中，同一个具体 Handler type 只能属于一个 EventBus registration，跨协议和跨注册名都不例外。
+如果通过 NameServer 和 classic Remoting 连接，请改用 `AddRocketMQRemoting` 与 `AddRemotingEventBus`。
 
-`configureProducer` 是发布能力开关。省略它时，该 registration 不会创建 Producer、Producer HostedService 或
-`IEventBus`。首次注册 Handler 时才会创建 Push Consumer，因此纯发布服务不会创建空 Consumer，纯消费服务也不会创建
-Producer。
+`configureProducer` 用于启用发布能力并注册 `IEventBus`；纯消费服务可以省略它。注册第一个处理器时才会添加 Push
+Consumer，因此纯发布服务不会启动空 Consumer。
 
-启用发布能力的 named registration 以相同名称暴露 keyed Publisher：
+通过默认注册发布事件：
+
+```csharp
+await eventBus.PublishAsync(
+    new OrderSubmittedIntegrationEvent { OrderId = orderId },
+    cancellationToken);
+```
+
+启用 Producer 的命名注册会用同一个名称暴露 keyed `IEventBus`：
 
 ```csharp
 var ordersEventBus = serviceProvider.GetRequiredKeyedService<IEventBus>("orders");
-await ordersEventBus.PublishAsync(new OrderSubmittedIntegrationEvent { OrderId = orderId });
 ```
 
-默认 registration 暴露未键控 `IEventBus`。`PublishAsync` 的 `CancellationToken` 为可选参数；序列化和发送失败使用
-`EventBusPublishException`，调用方主动取消仍保持为 `OperationCanceledException`。
+## 路由与失败处理
+
+`Topic` 直接对应 RocketMQ Topic。非 `null` 的 `Tag` 是一个字面量 Tag；`null` 表示发布无 Tag 消息。在同一个
+EventBus 注册项中，区分大小写且按序号比较的 `(Topic, Tag)` 只对应一种事件类型。该事件类型可以注册多个处理器，
+消息只反序列化一次，处理器随后按顺序执行。默认 JSON 消息体不包含 `Topic` 和 `Tag`。
+
+序列化和发送失败统一抛出 `EventBusPublishException`；调用方主动取消时仍抛出
+`OperationCanceledException`。
+
+消费时，只有全部匹配的处理器都成功完成，消息才算处理成功。处理器失败会请求重试；未知路由和无效 Payload 会
+请求死信处理。适配器会根据对应协议客户端的能力映射这些结果。
 
 ## 日志
 
-适配器将成功的发布与消费记录为 `Information`，将发布失败、EventBus 自己选择的 `Retry` 和 `DeadLetter` 记录为
-`Error`，并为每个消费 registration 输出一次聚合订阅汇总。发布日志和 Consumer 最终结果日志会在结构化 `Payload`
-字段中以单行 JSON 记录完整消息内容。使用自定义序列化器时，只要能获得事件对象，就使用内置 Newtonsoft.Json
-生成日志视图；路由未知时，原始 Body 会在需要时使用 Base64 JSON 包装。Consumer 反序列化失败时省略该字段。
-日志和 Payload 默认都开启，并可按 registration 配置：
+每个注册项默认启用 EventBus 日志和完整 Payload 日志：
 
 ```csharp
 eventBusBuilder.ConfigureLogging(options =>
@@ -142,23 +119,13 @@ eventBusBuilder.ConfigureLogging(options =>
 });
 ```
 
-Payload 日志可能包含敏感数据，应用还应配置适当的日志分类过滤、保留周期和访问控制：
+Payload 日志可能包含凭据、个人信息或其他敏感内容。部署时应配置适当的日志分类过滤、保留周期和访问控制。
 
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "EventHorizon.RocketMQ.Grpc.EventBus": "Information",
-      "EventHorizon.RocketMQ.Remoting.EventBus": "Warning"
-    }
-  }
-}
-```
+## 文档
 
-## 设计文档
-
-- [English 文档](docs/en-US/)
+- [English documentation](docs/en-US/)
 - [简体中文文档](docs/zh-CN/)
+- [示例](samples/)
 
 ## 许可证
 
