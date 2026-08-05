@@ -7,58 +7,41 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A strongly typed EventBus layer for
-[EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ), following the practical
-integration-event style used by Microsoft's eShop projects.
+A strongly typed EventBus for
+[EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ). It provides the same event,
+handler, routing, serialization, and hosting model for RocketMQ 5 gRPC and classic Remoting while keeping the two
+protocol adapters independent.
 
-It provides one application-facing model over RocketMQ 5 gRPC and classic Remoting while keeping the protocols in
-separate packages.
+## Choose a package
 
-## Scope
-
-The first release:
-
-- publishes strongly typed integration events and consumes through Push consumers only;
-- routes and deserializes one physical RocketMQ message per delivery;
-- registers Handlers directly or by deterministic assembly scanning;
-- resolves Handlers through Microsoft DI, with `Scoped` as the default lifetime;
-- preserves the main client's default and named/keyed registration model;
-- uses the main client's `IHostedService` registrations with Generic Host;
-- uses Newtonsoft.Json by default and permits a registration-specific custom serializer;
-- writes structured publish, consume, outcome, and subscription-summary logs; and
-- includes unit tests, protocol-specific three-Broker integration tests, runnable Consumer and Web API Publisher
-  samples, and a separate Compose environment.
-
-Standalone Pull, Simple, LitePush, SQL92, runtime subscriptions, transactional or ordered messages, delay messages,
-batch publishing, request-reply, and exactly-once delivery are outside this release. Classic Remoting Push may use
-PULL or POP internally for Broker-owned assignments without changing the EventBus API or handler. A later public
-delivery model requires an appropriate main-client hosted-delivery abstraction. Handlers must make their side effects
-idempotent.
-
-## Install
-
-| Package | Responsibility |
+| Package | Use it for |
 | --- | --- |
-| `EventHorizon.RocketMQ.Remoting.EventBus` | Classic Remoting Producer and clustering Push-consumer adapter |
-| `EventHorizon.RocketMQ.Grpc.EventBus` | RocketMQ 5 gRPC Producer and Push-consumer adapter |
+| [`EventHorizon.RocketMQ.Grpc.EventBus`](https://www.nuget.org/packages/EventHorizon.RocketMQ.Grpc.EventBus) | Services that connect through a RocketMQ 5 Proxy using gRPC |
+| [`EventHorizon.RocketMQ.Remoting.EventBus`](https://www.nuget.org/packages/EventHorizon.RocketMQ.Remoting.EventBus) | Services that discover Brokers through NameServer and use classic Remoting |
 
-Install the adapter for the chosen RocketMQ protocol. Both adapters restore the shared EventBus implementation
-transitively and never reference each other. That supporting package is intentionally unlisted from NuGet search and
-is not a direct user installation target.
+Install one adapter for the protocol used by the service. The two adapters are independent and can be selected without
+introducing the other protocol client.
 
-## Programming model
+## Supported model
 
-The public contracts live in `EventHorizon.RocketMQ.EventBus.Abstractions`, `.Events`, `.Exceptions`, and
-`.Serialization`; registration extensions live in the root namespace of Core or the selected adapter.
+- Strongly typed publishing and Push consumption
+- Exact `(Topic, Tag)` routing, including untagged messages
+- Direct handler registration or deterministic assembly scanning
+- Microsoft dependency injection and Generic Host lifecycle
+- Default and named/keyed client registrations
+- Newtonsoft.Json by default, with a replaceable serializer per registration
+- Structured publish, consume, outcome, and subscription-summary logs
 
-```csharp
-using EventHorizon.RocketMQ.EventBus;
-using EventHorizon.RocketMQ.EventBus.Abstractions;
-using EventHorizon.RocketMQ.EventBus.Events;
-using EventHorizon.RocketMQ.Grpc.EventBus;
-```
+Delivery is at least once, so handlers must make application side effects idempotent. Standalone Pull, SimpleConsumer,
+LitePull, LitePush, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, and runtime-subscription APIs
+are outside the current EventBus surface.
 
-An event inherits `IntegrationEvent` and gives its stable route to the base constructor:
+Classic Remoting Push may use PULL or POP internally for Broker-owned assignments. That choice does not change the
+EventBus API or handler contract.
+
+## Quick start
+
+Define an event with a stable route:
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
@@ -70,25 +53,9 @@ public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
 
     public Guid OrderId { get; init; }
 }
-
-public sealed class InventorySnapshotIntegrationEvent : IntegrationEvent
-{
-    public InventorySnapshotIntegrationEvent()
-        : base("inventory-snapshots")
-    {
-    }
-
-    public int Available { get; init; }
-}
 ```
 
-`Topic` maps directly to the RocketMQ topic. A non-null `Tag` maps to one literal tag; `null` publishes an untagged
-message. The exact, ordinal `(Topic, Tag)` route selects exactly one event type; that event type may have multiple
-Handlers, which run sequentially after one deserialization. `*` is a consumer filter expression, never an event tag.
-If a topic has any untagged route, its consumer subscribes with `*` and local routing still matches `(Topic, null)`
-exactly. Neither routing value is included in the default JSON body.
-
-Handlers use `Task`, so ordinary asynchronous application work needs no adapter-specific convention:
+Implement its handler:
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEventHandler
@@ -103,7 +70,7 @@ public sealed class OrderSubmittedIntegrationEventHandler
 }
 ```
 
-Register a gRPC EventBus and scan an application assembly:
+Register the gRPC adapter and scan the application assembly:
 
 ```csharp
 builder.Services
@@ -114,34 +81,42 @@ builder.Services
     .AddHandlersFromAssemblyOf<Program>();
 ```
 
-`AddHandler<THandler>()` registers one concrete Handler type. `AddHandlersFromAssemblyOf<TMarker>()` and
-`AddHandlersFromAssembly(assembly)` discover Handlers during startup; each accepts an optional `ServiceLifetime`.
-The same concrete Handler type may belong to only one EventBus registration in an `IServiceCollection`, across both
-protocols and all registration names.
+Use `AddRocketMQRemoting` and `AddRemotingEventBus` instead when connecting through NameServer and classic Remoting.
 
-`configureProducer` is the publishing switch. When it is omitted, the registration creates no Producer, Producer
-hosted service, or `IEventBus`. The first Handler creates the Push consumer, so publisher-only services do not create
-an empty consumer and consumer-only services do not create a Producer.
+`configureProducer` enables publishing and registers `IEventBus`. Omit it for a consumer-only service. A Push consumer
+is added when the first handler is registered, so publisher-only services do not start an empty consumer.
 
-For a named registration with publishing enabled, resolve the keyed publisher under the same name:
+Publish through the default registration:
+
+```csharp
+await eventBus.PublishAsync(
+    new OrderSubmittedIntegrationEvent { OrderId = orderId },
+    cancellationToken);
+```
+
+A named, Producer-enabled registration exposes keyed `IEventBus` under the same name:
 
 ```csharp
 var ordersEventBus = serviceProvider.GetRequiredKeyedService<IEventBus>("orders");
-await ordersEventBus.PublishAsync(new OrderSubmittedIntegrationEvent { OrderId = orderId });
 ```
 
-The default registration exposes an unkeyed `IEventBus`. `PublishAsync` accepts an optional
-`CancellationToken`; serialization and send failures use `EventBusPublishException`, while caller cancellation remains
+## Routing and failures
+
+`Topic` maps directly to the RocketMQ topic. A non-null `Tag` is one literal tag; `null` publishes an untagged message.
+Within one EventBus registration, the ordinal, case-sensitive `(Topic, Tag)` pair identifies exactly one event type.
+That event type may have multiple handlers, which run sequentially after one deserialization. `Topic` and `Tag` are
+not written into the default JSON body.
+
+Serialization and send failures are reported as `EventBusPublishException`. Caller-requested cancellation remains an
 `OperationCanceledException`.
+
+For consumption, a message succeeds only after all matching handlers complete. Handler failures request retry;
+unknown routes and invalid payloads request dead-letter handling. The adapter maps those outcomes to the capabilities
+of its protocol client.
 
 ## Logging
 
-The adapters log successful publish/consume activity at `Information`, and publish failures, EventBus-selected
-`Retry`, and `DeadLetter` outcomes at `Error`. They also emit one aggregated subscription summary per consumer
-registration. Publish and final Consumer outcome logs include the complete message content in the structured `Payload`
-field as single-line JSON. Custom-serializer events use the built-in Newtonsoft.Json view when an event object is
-available; unknown-route raw bodies use a Base64 JSON wrapper when needed. Consumer deserialization failures omit the
-field. Logging and payload inclusion both default to enabled and can be configured per registration:
+EventBus logging and full-payload logging are enabled by default for each registration:
 
 ```csharp
 eventBusBuilder.ConfigureLogging(options =>
@@ -151,23 +126,14 @@ eventBusBuilder.ConfigureLogging(options =>
 });
 ```
 
-Payload logs may contain sensitive data, so also configure ordinary category filters, retention, and access controls:
+Payload logs may contain credentials, personal data, or other sensitive content. Configure category filters,
+retention, and access controls for the deployment.
 
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "EventHorizon.RocketMQ.Grpc.EventBus": "Information",
-      "EventHorizon.RocketMQ.Remoting.EventBus": "Warning"
-    }
-  }
-}
-```
-
-## Design
+## Documentation
 
 - [English documentation](docs/en-US/)
 - [简体中文文档](docs/zh-CN/)
+- [Samples](samples/)
 
 ## License
 

@@ -172,6 +172,15 @@ documented EventBus-specific reason to differ.
   or user-facing functionality changes.
 - Keep English and Simplified Chinese README or design-note pairs semantically synchronized. Root READMEs stay concise;
   implementation detail belongs under the matching language folder in `docs`.
+- After synchronizing facts in any outward-facing Markdown, including root READMEs, NuGet package READMEs, samples,
+  and setup guides, perform a dedicated editorial pass in each published language. Preserve commands, identifiers,
+  links, technical facts, and boundary conditions while removing internal implementation detail, literal translation,
+  repetitive templates, vague claims, and unnatural wording. Public documentation must read as a user guide rather
+  than an architecture review or repository work log.
+- Do not proactively expose the Core package in root READMEs, adapter READMEs, samples, or setup guides. User-facing
+  installation and package-selection documentation presents only the gRPC and Remoting adapters. The Core package
+  README must identify it as an internal shared support dependency, omit a direct-install command, and direct users to
+  an adapter instead. The package graph and Core publication order belong in `docs` and release-maintainer guidance.
 - Update `consume-result-design.md` whenever result selection, cancellation, retry, dead-letter, or settlement behavior
   changes. Update `serialization-design.md` whenever the wire contract changes. Update `event-bus-design.md` for all
   other architectural and public-contract decisions.
@@ -204,8 +213,9 @@ documented EventBus-specific reason to differ.
   dependency on Core; do not embed the Core assembly in an adapter package.
 - Use `ProjectReference` between projects in this repository. Keep package dependency metadata, symbols, XML docs,
   Source Link, and package READMEs consistent with the main repository.
-- A transport-neutral event-contract project may reference Core directly. Application services normally reference only
-  their selected adapter and receive Core transitively.
+- Core is the adapters' internal shared support package, not a user entry point. Do not display its NuGet badge,
+  recommend it, or instruct users to install it. User-facing package selection and installation guidance presents only
+  the selected adapter, which restores Core transitively without calling attention to that implementation dependency.
 
 ## Testing and validation
 

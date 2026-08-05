@@ -140,16 +140,6 @@ jobs:
             dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
           done
 
-      - name: Unlist Core supporting package
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-          VERSION: ${{ steps.version.outputs.value }}
-        run: >-
-          dotnet nuget delete EventHorizon.RocketMQ.EventBus "$VERSION"
-          --api-key "$NUGET_API_KEY"
-          --source "$NUGET_SOURCE"
-          --non-interactive
-
       - name: Create stable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

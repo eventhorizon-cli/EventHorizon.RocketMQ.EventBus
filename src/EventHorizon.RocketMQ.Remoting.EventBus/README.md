@@ -3,71 +3,63 @@
 [English](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.Remoting.EventBus/README.md) |
 [简体中文](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/src/EventHorizon.RocketMQ.Remoting.EventBus/README.zh-CN.md)
 
-`EventHorizon.RocketMQ.Remoting.EventBus` is the strongly typed EventBus adapter for
-[EventHorizon.RocketMQ.Remoting](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ). It adds integration-event
-publishing and Push consumption to the classic RocketMQ Remoting client while keeping application event contracts,
-routing, and serialization transport-neutral in `EventHorizon.RocketMQ.EventBus`.
+`EventHorizon.RocketMQ.Remoting.EventBus` adds strongly typed event publishing and Push consumption to
+[EventHorizon.RocketMQ.Remoting](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ).
 
-The first release supports ordinary strongly typed event publishing and Push consumption only. It does not expose
-standalone Pull, LitePull, FIFO, transactional, delayed, priority, batch, request-reply, SQL92, or runtime subscription
-APIs. Remoting EventBus consumption uses clustering only, never broadcasting. Delivery is at least once; application
-handlers must make their side effects idempotent.
+Use this adapter when the application discovers Brokers through NameServer and connects with the classic RocketMQ
+Remoting protocol. Delivery is at least once, so handlers must make application side effects idempotent.
 
-The same Push EventBus supports the main client's client-owned PULL assignments and Broker-owned PULL or POP
-assignments. POP is an internal receive mode, not a separate EventBus API or handler contract.
-
-## Package and dependencies
-
-Install the package with:
+## Install
 
 ```shell
 dotnet add package EventHorizon.RocketMQ.Remoting.EventBus
 ```
 
-This package depends on the same-version `EventHorizon.RocketMQ.EventBus` Core package and
-`EventHorizon.RocketMQ.Remoting`. Core is restored transitively, is not embedded in this package, and is not a direct
-user installation target. The Remoting and gRPC EventBus adapters do not reference each other.
+The adapter includes the required Remoting client and shared EventBus dependencies. Applications normally need only
+this package.
 
-The adapter registers a closed protocol bridge through the existing public
-`AddRemotingPushConsumer<TMessageHandler>` API. Its internal generic anchor is the first application Handler owned by
-that EventBus registration. The adapter does not inspect service descriptors or access the client's internal role
-identity.
+The current EventBus surface supports strongly typed publishing and clustering-mode Push consumption. It does not
+expose standalone Pull, LitePull, broadcasting, FIFO, transactional, delayed, priority, batch, request-reply, SQL92,
+or runtime-subscription APIs.
 
-## Connection architecture
+## Connect to RocketMQ
 
-```text
-Application
-    |
-    v
-EventHorizon.RocketMQ.Remoting.EventBus
-    |
-    v
-EventHorizon.RocketMQ.Remoting
-    |
-    +--> NameServer route lookup
-    |         |
-    `---------> direct connections to advertised Brokers
+Set `NamesrvAddr` to one or more NameServer addresses. The client obtains route information from NameServer, then
+connects directly to the Broker addresses advertised in that route. Those Broker addresses must be reachable from the
+application environment.
+
+```csharp
+builder.Services.AddRocketMQRemoting(options =>
+{
+    options.NamesrvAddr = "localhost:9876";
+});
 ```
 
-`NamesrvAddr` addresses one or more NameServer endpoints. The Remoting client obtains route information from the
-NameServer, then establishes direct connections to the Broker addresses advertised in that route information. The
-application environment must therefore be able to reach those advertised Broker addresses; a Proxy is not the
-Remoting EventBus endpoint.
+A RocketMQ 5 Proxy address is not a Remoting `NamesrvAddr`. See the underlying Remoting client guide for TLS, ACL,
+namespace, and multi-NameServer configuration.
 
-The Remoting Push consumer is not a server-initiated Broker push protocol. It performs client-initiated long polling.
-This adapter forces `ConsumeMessageBatchSize = 1`, so each transport callback delivers one physical message to the
-EventBus. `PullBatchSize` and `PopBatchSize` may still be greater than one for receive efficiency.
+## PULL and POP inside Push
 
-`QueueAssignmentMode` defaults to `RemotingPushQueueAssignmentMode.Client`, which allocates queues in the client and
-uses PULL. Set it to `Broker` for concurrent clustering consumption when the deployment manages assignment request
-modes on the Broker. Each returned assignment then selects PULL or POP without changing the EventBus handler. For POP,
-processing must finish within `PopInvisibleDuration`; classic Remoting Push does not renew the receipt while a handler
-is active.
+The EventBus always exposes one Push-consumer programming model. Queue assignment controls which receive path the
+underlying Remoting client uses:
 
-## Programming model
+| `QueueAssignmentMode` | Queue assignment and receive behavior |
+| --- | --- |
+| `RemotingPushQueueAssignmentMode.Client` | Default. The client assigns queues and receives with PULL. |
+| `RemotingPushQueueAssignmentMode.Broker` | The Broker assigns queues; each returned assignment may use PULL or POP according to Broker configuration. |
 
-An application event declares stable RocketMQ routing metadata in its public parameterless constructor. A tag is
-optional:
+Switching between these modes does not change the EventBus API or handler contract. Broker assignment requires the
+corresponding Broker-side assignment request mode to be configured.
+
+For POP, processing must finish within `PopInvisibleDuration`. Classic Remoting Push does not automatically renew the
+receipt while a handler is running, so configure the invisible duration for the longest expected processing time.
+
+The adapter sets `ConsumeMessageBatchSize = 1`, which keeps one physical message per EventBus handler invocation.
+`PullBatchSize` and `PopBatchSize` may still be greater than one to preserve receive efficiency.
+
+## Define events and handlers
+
+Each event declares a stable RocketMQ route in its public parameterless constructor:
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
@@ -78,22 +70,11 @@ public sealed class OrderSubmittedIntegrationEvent : IntegrationEvent
     }
 
     public Guid OrderId { get; init; }
-
     public decimal Total { get; init; }
-}
-
-public sealed class InventorySnapshotIntegrationEvent : IntegrationEvent
-{
-    public InventorySnapshotIntegrationEvent()
-        : base("inventory-snapshots")
-    {
-    }
-
-    public int Available { get; init; }
 }
 ```
 
-Handlers implement the typed asynchronous contract:
+Implement the typed asynchronous handler contract:
 
 ```csharp
 public sealed class OrderSubmittedIntegrationEventHandler
@@ -108,16 +89,13 @@ public sealed class OrderSubmittedIntegrationEventHandler
 }
 ```
 
-`Topic` becomes the RocketMQ topic. A non-null `Tag` becomes one literal RocketMQ tag; `null` publishes an untagged
-message. Within an EventBus registration, the ordinal, case-sensitive `(Topic, Tag)` pair identifies one event type.
-`*` is a consumer `FilterExpression`, not an event tag. When any route for a topic is untagged, the Remoting consumer
-subscribes with `*`, while local dispatch still selects `(Topic, null)` exactly. The transport metadata is not written
-to the JSON body.
+`Topic` maps directly to the RocketMQ topic. A non-null `Tag` is one literal tag; `null` publishes an untagged message.
+Within one registration, the ordinal, case-sensitive `(Topic, Tag)` pair identifies exactly one event type. `Topic`
+and `Tag` are not included in the default JSON body.
 
-## Registration
+## Register the EventBus
 
-The following default registration enables both publishing and consumption. It discovers handlers from the application
-assembly. The resulting `IEventBus` registration is unkeyed for the default client registration.
+This registration enables publishing and consumption, then scans the application assembly for handlers:
 
 ```csharp
 var builder = Host.CreateApplicationBuilder(args);
@@ -137,8 +115,16 @@ using var host = builder.Build();
 await host.RunAsync();
 ```
 
-Use a named main-client registration when the host needs isolated clients. A Producer-enabled named EventBus exposes
-keyed `IEventBus` under the same name; this example uses direct Handler registration rather than assembly scanning:
+Use `AddHandler<THandler>()` for one handler, `AddHandlersFromAssemblyOf<TMarker>()` for a marker assembly, or
+`AddHandlersFromAssembly(assembly)` for an explicit assembly. Handler registration is startup-only. Handlers default
+to `Scoped`; `Transient` and `Singleton` are also available, and singleton handlers must be thread-safe.
+
+`configureProducer` enables publishing and registers `IEventBus`. Omit it for a consumer-only service. A Push consumer
+is added when the first handler is registered, so a publisher-only service can enable the Producer without registering
+handlers. Generic Host starts and stops the configured RocketMQ roles.
+
+Named RocketMQ registrations are also supported. A named, Producer-enabled EventBus exposes keyed `IEventBus` under
+the same name:
 
 ```csharp
 builder.Services
@@ -152,80 +138,27 @@ using var host = builder.Build();
 var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 ```
 
-`AddHandlersFromAssemblyOf<TMarker>()` scans a marker type's assembly. `AddHandlersFromAssembly(assembly)` scans an
-explicit `Assembly`; `AddHandler<THandler>()` registers one Handler type. Registration is startup-only and must finish
-before the service provider or Host is built. There is no runtime subscribe, unsubscribe, Handler registration, or
-assembly scanning API.
+## Delivery behavior
 
-Within one EventBus registration, direct registrations retain call order and assembly scanning is deterministic.
-Duplicate event-Handler pairs with the same lifetime are idempotent; conflicting lifetimes are configuration errors.
-One Handler type cannot be registered with another default or named EventBus registration in the same service
-collection. Handlers default to `Scoped`, and may instead be `Transient` or `Singleton`; singleton Handlers must be
-thread-safe.
+Each message is deserialized once. All matching handlers run sequentially within one asynchronous DI scope, and the
+message succeeds only after every handler completes.
 
-## Optional roles and lifecycle
-
-`configureProducer` is the publishing capability switch:
-
-| Configuration | Registered roles |
+| Condition | Remoting result |
 | --- | --- |
-| `configureProducer` is non-null | One Remoting Producer and unkeyed `IEventBus` for the default registration, or keyed `IEventBus` for a named registration |
-| `configureProducer` is null | No Producer, Producer hosted service, or `IEventBus` for that registration |
-| The first Handler is registered | One clustering-mode Remoting Push consumer is added |
-| Neither a Producer nor a Handler is registered | No EventBus transport role or hosted service is added |
+| Route is known, payload is valid, and all handlers finish | `Success` |
+| A handler or application dependency fails | `Retry` |
+| Route is unknown or payload is invalid | `DeadLetter` |
+| Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result |
 
-Consequently, a consumer-only service omits `configureProducer`; a publisher-only service provides a non-null
-`configureProducer` and registers no Handlers. Each default or named EventBus registration keeps its own route table,
-serializer, Handler registrations and lifetimes, optional Producer, and optional Push consumer.
+Serialization failures, transport send failures, and non-success Remoting send statuses use
+`EventBusPublishException`. Caller-requested cancellation remains an unwrapped `OperationCanceledException`.
 
-The adapter composes the main Remoting client's `IHostedService` registrations. Generic Host starts and stops the
-actual Producer and Push consumer roles; applications using Generic Host must not manually call the underlying client's
-`StartAsync` or `StopAsync` methods.
+## Serialization and logging
 
-## Serialization and dispatch
+Newtonsoft.Json is the default serializer. It writes compact UTF-8 JSON with `TypeNameHandling.None` and no event
+envelope or .NET type name. Use `UseSerializer<TSerializer>()` to replace it for one EventBus registration.
 
-Newtonsoft.Json is the default serializer. It writes the concrete event type as compact UTF-8 JSON with
-`TypeNameHandling.None`; there is no envelope or .NET type name, and `Topic` and `Tag` are excluded from the body.
-The startup route table selects the destination event type before deserialization.
-
-Use `UseSerializer<TSerializer>()` to replace the per-registration serializer with an `IIntegrationEventSerializer`
-implementation. Each EventBus registration owns a private-token-keyed singleton; using the same Serializer type in two
-registrations creates two independent instances. Custom serializers must be thread-safe, deterministic, and compatible
-between the event's producers and consumers.
-
-Each delivered message uses one asynchronous DI scope. The adapter resolves all matching Handlers from that scope and
-invokes them sequentially. A message succeeds only after every Handler completes successfully.
-
-| Condition | Dispatch outcome |
-| --- | --- |
-| Route is known, payload is valid, and all Handlers finish | `Success` |
-| Handler or application dependency resolution fails | EventBus returns `Retry` |
-| The main client cannot create or dispose the delivery scope, or consume timeout expires | The underlying consumer retries; EventBus does not manufacture an outcome |
-| Route is unknown or payload cannot be deserialized | `DeadLetter` |
-| Host shutdown cancels delivery | Cancellation continues to the underlying consumer; no outcome is manufactured |
-
-The Remoting adapter explicitly maps its internal outcome to
-`EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`. It does not expose a transport `ConsumeResult` in the EventBus
-public API.
-
-Serialization failures, transport send failures, and non-success Remoting send statuses are exposed as
-`EventBusPublishException`. Cancellation requested by the caller remains an unwrapped `OperationCanceledException`.
-
-## Logging
-
-The adapter writes structured publish, consume, and outcome logs through `Microsoft.Extensions.Logging` under the
-`EventHorizon.RocketMQ.Remoting.EventBus` category prefix. Successful publish and consume operations use `Information`;
-publish failures, EventBus-selected `Retry`, and `DeadLetter` use `Error`. Consume timeout and delivery-scope lifecycle
-failures are logged by the underlying client. Normal Host-shutdown cancellation is not an EventBus error.
-Publish and final Consumer outcome logs include the complete message content in the structured `Payload` field as
-single-line JSON. The default serializer reuses the actual JSON body. With a custom serializer, the built-in
-Newtonsoft.Json serializer produces the logging view whenever the event object is available; an unreadable raw body is
-represented as `{"encoding":"base64","data":"..."}`. A serialization failure before any body exists can leave
-`Payload` empty. Consumer deserialization failures omit the field entirely.
-
-EventBus logging and payload inclusion both default to enabled. Configure them independently for each default or named
-registration; `Enabled = false` suppresses that registration's publish, Consumer, outcome, and subscription-summary
-logs without affecting the underlying RocketMQ client logs:
+Structured EventBus logs and full-payload logging are enabled by default:
 
 ```csharp
 eventBusBuilder.ConfigureLogging(options =>
@@ -235,34 +168,18 @@ eventBusBuilder.ConfigureLogging(options =>
 });
 ```
 
-These full-payload logs can contain credentials, personal data, or other sensitive content. Configure category
-filters, log retention, and access controls for the deployment. For example:
-
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "EventHorizon.RocketMQ.Remoting.EventBus": "Information"
-    }
-  }
-}
-```
-
-After a Consumer registration's routes have been validated and all local subscriptions materialized, the adapter emits
-exactly one aggregated `Information` subscription summary for that EventBus registration, not one log per Handler. It
-includes the registration name (`<default>` for the default registration), Consumer Group, Handler count,
-subscription count, and deterministically ordered Topic plus tag `FilterExpression` values. It describes local client
-configuration, not Broker acknowledgement.
+Payload logs may contain credentials, personal data, or other sensitive content. Configure category filters,
+retention, and access controls for `EventHorizon.RocketMQ.Remoting.EventBus`.
 
 ## Further reading
 
 - [EventBus design](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/event-bus-design.md)
-- [`ConsumeResult` handling design](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/consume-result-design.md)
-- [Serialization design](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/serialization-design.md)
-- [Testing, environments, and samples](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/testing-design.md)
-- [Underlying Remoting client samples](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/tree/main/samples/remoting)
+- [`ConsumeResult` handling](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/consume-result-design.md)
+- [Serialization contract](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/docs/en-US/serialization-design.md)
+- [Runnable samples](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/tree/main/samples)
+- [Underlying Remoting client guide](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/main/src/EventHorizon.RocketMQ.Remoting/README.md)
 
 ## License
 
-This project is licensed under the
+This package is licensed under the
 [MIT License](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/blob/main/LICENSE).
