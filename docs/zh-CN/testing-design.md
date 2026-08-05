@@ -212,13 +212,14 @@ v<major>.<minor>.<patch>
 
 解析出的版本会原样赋予三个生产 Package。workflow 会先 Restore、Build 并运行发布用 Unit Tests，再使用同一个版本打包
 `EventHorizon.RocketMQ.EventBus`、`EventHorizon.RocketMQ.Grpc.EventBus` 和
-`EventHorizon.RocketMQ.Remoting.EventBus`。它会在发布前把生成的 `.nupkg` 和 `.snupkg` 文件上传为 workflow Artifact。
+`EventHorizon.RocketMQ.Remoting.EventBus`。发布前，完整的 `.nupkg` 和 `.snupkg` 文件会上传为内部 workflow Artifact。
 
 发布必须按以下顺序进行：
 
 1. 推送 Core 包。
 2. 立即推送 gRPC 与 Remoting 适配器包；它们声明了对同版本 Core 的普通依赖。
-3. 三个包全部推送成功后，才为 Tag 创建 GitHub Release；该 Release 不标记为 prerelease。
+3. 三个包全部推送成功后，才为 Tag 创建 GitHub Release。Release 只附带 gRPC 与 Remoting 适配器包及其符号包；Core
+   继续作为 NuGet 依赖，不作为公开的 Release 下载项。该 Release 不标记为 prerelease。
 
 发布工作流使用不会取消运行中发布任务的 release concurrency group，避免两个 Tag 交错发布。工作流创建 GitHub
 Release，因此需要 `contents: write`。三个包共用一个 `NUGET_API_KEY`；该密钥必须对三个 Package ID 都拥有发布权限。
