@@ -68,6 +68,9 @@ Core。Core 是两个适配器共用的支持包，不是推荐给用户的安�
 Core 程序集不会分别嵌入两个适配器包；否则应用同时引用两个适配器时，相同公开类型会产生程序集与版本冲突。仓库
 源码使用 `ProjectReference`，打包后则表现为对应的 NuGet 依赖。
 
+公开的 GitHub Release 只附带 gRPC 与 Remoting 适配器包及其符号包。Core 仍可供 NuGet 还原依赖，但不会作为用户下载
+项展示。完整的三包文件会保留在 Actions Artifact 中，供发布追溯。
+
 ### 公开命名空间
 
 | 命名空间 | 公开职责 |
@@ -805,6 +808,7 @@ README 保持协议无关，并链接到两个适配器。本仓库使用 MIT Li
    路由、Handler、生命周期、序列化器和实际配置的传输角色。
 9. 三个 NuGet 包都保持公开列出，并使用同一个版本和同一个发布 Tag。Core 是两个适配器共用的支持包，不是推荐给
    用户的安装入口。Core 最先推送，因为两个适配器都声明了对同版本 Core 的依赖；随后立即推送适配器。
+   公开的 GitHub Release 只附带两个适配器及其符号包。
 10. Remoting EventBus 消费只使用 `Clustering`，首版不支持 `Broadcasting`。同一个 Push Consumer 可以使用 Client
     分配的 PULL，或 Broker 分配的 PULL/POP，不会改变 EventBus API。
 11. 两个适配器默认通过 `Microsoft.Extensions.Logging` 记录发布和消费结果；发布和 Consumer 最终结果会用 JSON

@@ -230,14 +230,15 @@ complete stable-SemVer rule; the first workflow step enforces it.
 The parsed version is assigned unchanged to all three production packages. The workflow restores, builds, and runs the
 unit release-validation tests before packing `EventHorizon.RocketMQ.EventBus`,
 `EventHorizon.RocketMQ.Grpc.EventBus`, and `EventHorizon.RocketMQ.Remoting.EventBus` with that one version. It uploads
-the produced `.nupkg` and `.snupkg` files as workflow artifacts before publication.
+the complete produced `.nupkg` and `.snupkg` set as an internal workflow artifact before publication.
 
 Publication is deliberately ordered:
 
 1. Push the Core package.
 2. Push the gRPC and Remoting adapter packages immediately; both declare the same-version Core dependency.
-3. Create a GitHub Release for the tag only after all three package pushes succeed; the Release is never marked as a
-   prerelease.
+3. Create a GitHub Release for the tag only after all three package pushes succeed. Attach only the gRPC and Remoting
+   adapter packages and their symbol packages; Core remains a NuGet dependency rather than a public Release download.
+   The Release is never marked as a prerelease.
 
 The publish workflow uses a non-cancelling release concurrency group, so two tags cannot interleave publication. It
 needs `contents: write` because it creates the GitHub release. One `NUGET_API_KEY` publishes all three packages, so its

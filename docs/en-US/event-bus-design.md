@@ -72,6 +72,10 @@ Core is not embedded into either adapter package, because duplicating the same p
 create assembly and version conflicts when both adapters are referenced. The source projects use `ProjectReference`;
 packed adapters express the corresponding NuGet dependency.
 
+The public GitHub Release attaches only the gRPC and Remoting adapter packages and their symbol packages. Core remains
+available from NuGet for dependency restore but is not presented as a user download. The complete three-package set is
+retained as an Actions artifact for release traceability.
+
 ### Public namespaces
 
 | Namespace | Public responsibility |
@@ -862,7 +866,8 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
    configured transport roles.
 9. All three NuGet packages are listed and use one version and one release tag. Core is the adapters' shared support
    package rather than the recommended user entry point. It is pushed first because both adapters declare it as a
-   same-version dependency; adapters are pushed immediately afterward.
+   same-version dependency; adapters are pushed immediately afterward. Public GitHub Release assets include only the
+   two adapters and their symbols.
 10. Classic Remoting EventBus consumption uses clustering only; broadcasting is outside the first release. Its Push
     consumer may use client-owned PULL assignments or Broker-owned PULL/POP assignments without changing EventBus APIs.
 11. Both adapters log publish and consume outcomes by default through Microsoft logging. Publish and final Consumer
