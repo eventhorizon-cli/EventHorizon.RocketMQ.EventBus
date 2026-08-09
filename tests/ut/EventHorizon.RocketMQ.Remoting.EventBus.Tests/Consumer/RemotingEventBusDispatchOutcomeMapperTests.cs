@@ -7,8 +7,8 @@ public sealed class RemotingEventBusDispatchOutcomeMapperTests
     [Theory]
     [InlineData("Success", ConsumeResult.Success)]
     [InlineData("Retry", ConsumeResult.Retry)]
-    [InlineData("DeadLetter", ConsumeResult.DeadLetter)]
-    public void Map_MapsEveryEventBusOutcomeExplicitly(string outcomeName, ConsumeResult expected)
+    [InlineData("DeadLetter", ConsumeResult.Retry)]
+    public void Map_EventBusOutcome_ReturnsSupportedRemotingResult(string outcomeName, ConsumeResult expected)
     {
         var result = Map(CreateOutcome(outcomeName));
 

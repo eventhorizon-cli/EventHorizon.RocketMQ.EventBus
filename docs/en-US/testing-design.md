@@ -59,8 +59,11 @@ Adapter and compatibility tests cover:
   default or named EventBus registration;
 - private-token isolation of routes, serializers, and distinct Handler types across registrations;
 - a fixed Scoped protocol bridge and exactly one main-client-owned async scope per delivery;
-- explicit mapping of every internal outcome to each independently defined transport `ConsumeResult`, including gRPC
-  `Retry`/`DeadLetter` convergence on `Failure`;
+- the exact adapter result contracts: gRPC's sealed-record `Success`/`Failure` mapping (EventBus never emits its
+  LitePush-only `Suspend`), Remoting's `Success`/`Retry` enum mapping, and the internal `DeadLetter` mapping to
+  Remoting `Retry` plus `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`;
+- the Remoting context boundary: ordinary internal `Retry` leaves the delay at the default `0`, concurrent PULL may
+  interpret the negative `DeadLetter` sentinel as direct DLQ, and POP normalizes it to `0`;
 - Remoting non-success send statuses becoming publish failures; and
 - cancellation-token propagation and subscription-summary startup behavior.
 
@@ -125,7 +128,9 @@ the default and is covered by the original PULL workflow.
 
 The fixtures create unique Topics and Groups, wait on observable conditions with bounded timeouts, and own all Docker
 resources. Deterministic unit tests cover result mapping, malformed payloads, unknown routes, retry classification,
-named registrations, and other branches that do not require a Broker.
+the Remoting context side effect and default delay, named registrations, and other branches that do not require a
+Broker. Mapper and Handler tests respectively assert the returned transport value and context mutation, so a future
+transport enum change cannot make an internal `DeadLetter` look like a universal direct-DLQ operation.
 
 ## Independent Compose environment
 

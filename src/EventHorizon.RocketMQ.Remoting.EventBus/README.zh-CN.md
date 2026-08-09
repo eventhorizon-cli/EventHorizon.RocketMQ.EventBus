@@ -136,12 +136,16 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 每条消息只反序列化一次。全部匹配的处理器在同一个异步 DI Scope 中按顺序执行；只有所有处理器都成功完成，消息才
 算处理成功。
 
-| 情况 | Remoting 结果 |
+| 情况 | 内部结果与 Remoting 处置 |
 | --- | --- |
 | 路由已知、Payload 有效且所有处理器都成功完成 | `Success` |
-| 处理器或应用依赖失败 | `Retry` |
-| 路由未知或 Payload 无效 | `DeadLetter` |
+| 处理器或应用依赖失败 | 内部 `Retry`；返回 `ConsumeResult.Retry`，使用默认延迟级别 `0` |
+| 路由未知或 Payload 无效 | 内部 `DeadLetter`；设置 `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`，并返回 `ConsumeResult.Retry` |
 | Host 停止并取消投递 | 继续传播取消，不额外生成结果 |
+
+Remoting 客户端 0.6.1 的 `ConsumeResult` 枚举只有 `Success` 和 `Retry`；`DeadLetter` 是 EventBus 内部分类和日志结果，
+不是传输层结果。负延迟级别哨兵值只有在底层接收器使用并发 PULL 时才请求直接进入 DLQ。POP 会把负值归一化为 `0`，
+按正常重试进度处理，因此 EventBus 不承诺所有 Remoting 接收模式都立即进入 DLQ。
 
 序列化失败、传输发送失败和非成功的 Remoting 发送状态统一抛出 `EventBusPublishException`；调用方主动取消时仍
 抛出未包装的 `OperationCanceledException`。

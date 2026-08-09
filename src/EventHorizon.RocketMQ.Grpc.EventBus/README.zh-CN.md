@@ -124,8 +124,9 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 | 路由未知或 Payload 无效 | `Failure` |
 | Host 停止并取消投递 | 继续传播取消，不额外生成结果 |
 
-gRPC Push 处理器没有单独的死信返回值。遇到未知路由或无效 Payload 时，EventBus 会记录 `DeadLetter`，但向 gRPC
-返回 `Failure`；消息只有达到消费组的重试上限后，才会由 RocketMQ 转入 DLQ。
+gRPC 客户端 0.4.1 的 `ConsumeResult` 是 sealed record。EventBus 使用普通 Push，只会发出 `Success` 或 `Failure`，
+不会发出仅供 LitePush 使用的 `Suspend`。遇到未知路由或无效 Payload 时，EventBus 会记录 `DeadLetter`，但只返回
+`Failure`，不请求直接进入 DLQ；最终重试与 DLQ 策略由底层 Push 客户端和服务端共同负责。
 
 序列化和发送失败统一抛出 `EventBusPublishException`；调用方主动取消时仍抛出未包装的
 `OperationCanceledException`。

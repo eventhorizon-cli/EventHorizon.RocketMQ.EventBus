@@ -51,8 +51,16 @@ documented EventBus-specific reason to differ.
 - If the main client lacks a required capability or appears to have a design defect, open an issue in the
   `EventHorizon.RocketMQ` repository with the use case and boundary requirements. Do not modify the sibling main-client
   repository as part of an EventBus task unless the user separately and explicitly authorizes that main-client change.
-- `Grpc.Consumer.ConsumeResult` and `Remoting.Consumer.ConsumeResult` remain separate types. Map the internal common
-  outcome to each enum with an explicit switch; never cast by numeric value.
+- `Grpc.Consumer.ConsumeResult` and `Remoting.Consumer.ConsumeResult` remain separate types. Against the released
+  [gRPC `grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)
+  client, the former is a sealed record with `Success`, `Failure`, and a LitePush-only `Suspend` factory; EventBus emits
+  only `Success` or `Failure`. Against the released
+  [Remoting `remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)
+  client, the latter enum contains
+  only `Success` and `Retry`. Map the internal common outcome with an explicit switch; never cast by numeric value.
+  Internal `DeadLetter` maps to Remoting `Retry` after setting
+  `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`; concurrent PULL may interpret that sentinel as direct
+  DLQ, while POP normalizes it to the default retry level. Ordinary `Retry` leaves the delay at its default.
 - Keep transport message conversion, Producer integration, Push Consumer options, subscription materialization,
   protocol result mapping, and transport-specific logging in the owning adapter.
 - Keep Core consumption registration and dispatch transport-mode-neutral. A future public delivery model such as gRPC
@@ -234,9 +242,11 @@ documented EventBus-specific reason to differ.
 - Unit tests must not require an external RocketMQ installation or network access. Use xUnit v3 and normally strict Moq
   mocks. Use stateful fakes only when mocks would obscure streaming, lifecycle, or concurrency behavior.
 - Add compatibility tests that verify both adapters map every internal dispatch outcome to the correct independent
-  transport enum. Test route validation, deterministic scanning, duplicate registration, handler ordering, serializer
-  replacement, DI lifetime, cancellation, optional role creation, named isolation, subscription-summary logs, logging
-  levels, and every `ConsumeResult` branch.
+  transport result contract. Test the gRPC sealed-record mapping (`Success` and `Failure`; EventBus never emits
+  `Suspend`) and the Remoting enum mapping (`Success`/`Retry`), including the Remoting `DeadLetter` context side effect
+  (`DelayLevelWhenNextConsume = -1`) and ordinary `Retry` default delay. Also test route validation, deterministic
+  scanning, duplicate registration, handler ordering, serializer replacement, DI lifetime, cancellation, optional role
+  creation, named isolation, subscription-summary logs, logging levels, and every `ConsumeResult` branch.
 - Integration suites cover Generic Host lifecycle, concurrent tagged and untagged publish/consume success, exact
   routing, Newtonsoft.Json compatibility, and message distribution across three independent Brokers for both real
   transports. Keep retry, dead-letter, malformed-payload, unknown-route, and other deterministic outcome branches in

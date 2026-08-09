@@ -56,8 +56,11 @@ The transport adapters do not reference each other. Applications install only th
 they use.
 
 Transport-specific `ConsumeResult` types do not enter the public EventBus API. The common dispatch path produces an
-internal transport-neutral outcome, and each adapter explicitly maps it to the enum defined by its own main-client
-package. See the [`ConsumeResult` handling design](consume-result-design.md#package-boundary).
+internal transport-neutral outcome, and each adapter explicitly maps it to the result contract defined by its own
+main-client package. The released gRPC client exposes a sealed record (`Success`, `Failure`, and LitePush-only
+`Suspend`), while the released Remoting client exposes an enum with only `Success` and `Retry`; see the
+[`ConsumeResult` handling design](consume-result-design.md#package-boundary) for the adapter mappings and Remoting
+PULL/POP settlement distinction.
 
 ### NuGet distribution
 
@@ -650,8 +653,8 @@ that Consumer deserialization-failure entries omit the field.
 | Publish failed or returned a non-success result | `Error` | Topic, tag, duration, exception or transport result, and `Payload` when it can be produced |
 | Consumer dispatch completed with `Success` | `Information` | Topic, tag, message ID, Broker name, queue ID, queue offset, delivery attempt, duration, outcome, and `Payload` |
 | EventBus requested `Retry` after a Handler or dependency failure | `Error` | The same delivery fields, retry outcome, exception when available, and `Payload` |
-| Consumer selected `DeadLetter` because the route was unknown | `Error` | The available delivery fields, outcome, and actual-body `Payload` |
-| Consumer selected `DeadLetter` because deserialization failed | `Error` | The available delivery fields and outcome; no `Payload` field |
+| EventBus classified an internal `DeadLetter` because the route was unknown | `Error` | The available delivery fields, internal outcome, and actual-body `Payload`; Remoting settles with `Retry` plus the conditional `-1` delay sentinel |
+| EventBus classified an internal `DeadLetter` because deserialization failed | `Error` | The available delivery fields and internal outcome; no `Payload` field; Remoting still settles with `Retry` plus the conditional `-1` delay sentinel |
 
 Consume timeouts and delivery-scope lifecycle failures are owned and logged by the main client. They can cause a
 transport retry after the EventBus dispatch call has returned or been abandoned, so they are not reported as a new
@@ -726,9 +729,11 @@ EventBus classifies each completed dispatch attempt with one of these internal o
 | No registered event matches the received topic and tag | `DeadLetter` |
 | Host shutdown cancels the delivery | Propagate cancellation; do not force a new result |
 
-The protocol adapter maps this classification to its main client's result. Remoting preserves all three values. gRPC
-maps both `Retry` and `DeadLetter` to `Failure`; the service moves the message to DLQ only after the consumer group's
-retry limit. The [`ConsumeResult` handling design](consume-result-design.md) defines the complete mapping.
+The protocol adapter maps this classification to its main client's result. gRPC maps both `Retry` and `DeadLetter` to
+`Failure`; `Suspend` is not emitted by EventBus. Remoting maps internal `Success` to `Success` and both failure states
+to `Retry`. For internal `DeadLetter`, the adapter also sets `DelayLevelWhenNextConsume = -1`; only a concurrent PULL
+receiver treats that sentinel as direct DLQ, while POP normalizes it to `0` and follows normal retry progression. The
+[`ConsumeResult` handling design](consume-result-design.md) defines the complete mapping.
 
 Neither adapter provides exactly-once delivery. A retry can overlap a handler that ignored cancellation, and dispatch
 to multiple handlers can repeat handlers that already completed. Consumers must make side effects idempotent.
@@ -852,8 +857,10 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
 3. Every concrete integration-event type has a public parameterless constructor. Registration uses it to discover the
    route without attributes, static abstract members, or application services.
 4. Handler failures produce the internal `Retry` outcome. Deserialization failures and unknown routes produce the
-   internal `DeadLetter` outcome. Remoting can request immediate DLQ delivery; gRPC maps both failure outcomes to
-   `Failure` and relies on the service-side retry/DLQ threshold.
+   internal `DeadLetter` outcome. Remoting maps both failure outcomes to `Retry`; for `DeadLetter` it sets the
+   `DelayLevelWhenNextConsume = -1` sentinel, which requests direct DLQ only on concurrent PULL and is normalized by POP.
+   gRPC maps both failure outcomes to `Failure` and leaves the effective retry/DLQ policy to the underlying Push
+   client and service.
 5. The EventBus deserializes and dispatches one message per invocation while retaining configurable transport prefetch
    and consumer concurrency. Remoting handler batches are fixed at one.
 6. Public names use `EventHorizon.RocketMQ.EventBus`, `IntegrationEvent`, and

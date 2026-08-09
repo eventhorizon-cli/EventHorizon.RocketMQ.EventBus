@@ -7,10 +7,14 @@ This document defines how the EventBus adapters classify one delivered RocketMQ 
 the transport-level `ConsumeResult`. Application handlers do not return `ConsumeResult`; they return `Task`. EventBus
 combines route resolution, deserialization, and all handler executions into one internal outcome.
 
-The transport packages intentionally expose different values:
+The transport packages intentionally expose different result contracts:
 
-- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`: `Success`, `Failure`
-- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`: `Success`, `Retry`, `DeadLetter`
+- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult` (gRPC client [`grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)) is a sealed record with `Success` and
+  `Failure` results plus the `Suspend(TimeSpan)` factory. EventBus uses the regular Push contract and emits only
+  `Success` or `Failure`; `Suspend` is a LitePush capability and is never emitted by EventBus.
+- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult` (Remoting client [`remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)) is an enum with only `Success` and
+  `Retry`. It has no `DeadLetter` member. Remoting direct dead-lettering is requested through the
+  `RemotingPushConsumeContext` delay-level sentinel described below.
 
 EventBus applies the same route, payload, and handler classification for both protocols, then maps that internal
 decision to the result supported by the owning transport. The wire-level disposition is therefore not identical.
@@ -36,10 +40,12 @@ Grpc.Consumer.ConsumeResult      Remoting.Consumer.ConsumeResult
 ```
 
 The internal outcome has three semantic states, but it is not a public application contract. Each adapter uses an
-explicit `switch` to map those states to its own transport enum. Remoting preserves all three values. gRPC maps both
-`Retry` and `DeadLetter` to `Failure`, because its public Push handler contract has no direct dead-letter result. The
-adapters must not cast by numeric value; unit tests lock every mapping so independent main-client evolution cannot
-silently alter behavior.
+explicit `switch` to map those states to its own transport result. gRPC maps both `Retry` and `DeadLetter` to `Failure`,
+because its public Push handler contract has no direct dead-letter result. Remoting maps internal `Success` to
+`ConsumeResult.Success` and both internal failure states to `ConsumeResult.Retry`; only an internal `DeadLetter` also
+sets `RemotingPushConsumeContext.DelayLevelWhenNextConsume` to `-1`. Ordinary `Retry` leaves that context property at
+its default `0`. The adapters must not cast by numeric value; unit tests lock the result mapping and Remoting context
+side effect so independent main-client evolution cannot silently alter behavior.
 
 This keeps `EventHorizon.RocketMQ.EventBus` free of gRPC and Remoting references and avoids a dependency from either
 adapter to the other. An application may reference both packages without creating a type collision inside the already
@@ -67,9 +73,12 @@ identities.
 | The underlying consumer is stopping and cancels the delivery operation | No adapter result is forced | Cancellation propagates to the consumer so it can perform its normal shutdown and settlement behavior |
 
 The EventBus never returns `Success` after catching an exception. It classifies unknown routes and malformed payloads
-as deterministic `DeadLetter` outcomes instead of transient `Retry` outcomes. On Remoting this requests direct
-dead-letter delivery. On gRPC the transport can only receive `Failure`, so the service may redeliver the message until
-the consumer group's maximum attempts are exhausted.
+as deterministic `DeadLetter` outcomes instead of transient `Retry` outcomes. On Remoting the adapter preserves that
+classification in its logs, sets the delay-level sentinel, and returns the only available failure result,
+`ConsumeResult.Retry`. The Remoting client interprets a negative delay as direct dead-letter delivery only for a
+concurrent PULL receiver; POP normalizes it to `0` and follows its normal retry progression. On gRPC the transport can
+only receive `Failure`, so the service may redeliver the message until the consumer group's maximum attempts are
+exhausted.
 
 ## Processing flow
 
@@ -143,17 +152,19 @@ contract; the EventBus cannot reliably distinguish that failure from an invalid 
 
 ## Transport settlement
 
-`ConsumeResult` expresses the EventBus decision; the underlying client performs the actual Broker operation:
+`ConsumeResult` is the adapter-to-client settlement signal; the underlying client performs the actual Broker operation:
 
 | Internal EventBus outcome | gRPC Push consumer | Remoting Push consumer |
 | --- | --- | --- |
-| `Success` | Acknowledges the message | Commits the singleton message |
-| `Retry` | Returns `Failure`; the main client schedules redelivery and the service-side retry policy remains authoritative | Returns `Retry` and sends the singleton message back for delayed redelivery |
-| `DeadLetter` | Returns `Failure`; Push exposes no direct dead-letter result, so the service moves the message to DLQ only after the group's maximum attempts | Returns `DeadLetter` and sends the singleton message directly to DLQ |
+| `Success` | Returns `Success` and acknowledges the message | Returns `Success` and commits the singleton message |
+| `Retry` | Returns `Failure`; the main client schedules redelivery and the service-side retry policy remains authoritative | Returns `Retry` and keeps the context delay at its default `0`, selecting normal delayed redelivery |
+| `DeadLetter` | Returns `Failure` and requests no direct DLQ operation; the underlying Push client and service apply the effective retry/DLQ policy | Sets `DelayLevelWhenNextConsume = -1` and returns `Retry`; concurrent PULL interprets the negative sentinel as direct DLQ, while POP normalizes it to `0` and follows normal retry progression |
 
 This distinction is deliberate. `DeadLetter` remains useful inside EventBus for deterministic classification and
-logging, but it is not a promise of immediate gRPC DLQ placement. EventBus does not call an internal forwarding RPC or
-add a public SimpleConsumer-style settlement API to work around the gRPC Push contract.
+logging, but it is not a transport enum value and it is not a promise of immediate DLQ placement. EventBus does not
+call an internal forwarding RPC or add a public SimpleConsumer-style settlement API to work around the gRPC Push
+contract. Remoting direct DLQ is likewise conditional on the underlying receiver being concurrent PULL; POP always
+normalizes the negative sentinel to the default retry level.
 
 The Remoting EventBus fixes `ConsumeMessageBatchSize` to `1`, so batch-wide `ConsumeResult` and `AckIndex` rules never
 create partial EventBus outcomes. Network prefetch may still retrieve more than one message, but each message is passed
@@ -163,19 +174,19 @@ When the delivery attempt reaches the transport's configured maximum, the underl
 failed delivery to DLQ. This does not change the EventBus classification or log: the transport owns the final retry and
 DLQ threshold.
 
-If acknowledgement, retry scheduling, or Remoting direct dead-letter forwarding fails, the underlying client may
-redeliver the message. A returned `Success` therefore does not provide exactly-once delivery.
+If acknowledgement, retry scheduling, or a conditional Remoting direct-dead-letter settlement fails, the underlying
+client may redeliver the message. A returned `Success` therefore does not provide exactly-once delivery.
 
 ## Logging
 
-The adapter records the selected result with structured fields, including the complete JSON-formatted `Payload`:
+The adapter records the selected internal outcome with structured fields, including the complete JSON-formatted `Payload`:
 
-| Result | Default level | Additional data |
+| Internal outcome | Default level | Additional data |
 | --- | --- | --- |
 | `Success` | `Information` | Topic, tag, message ID, Broker name, queue ID, queue offset, delivery attempt, duration, and `Payload` |
-| EventBus `Retry` | `Error` | The same delivery fields plus `Payload` and the Handler or dependency exception when available |
-| `DeadLetter`, unknown route | `Error` | The available delivery fields, outcome, and actual-body `Payload` |
-| `DeadLetter`, deserialization failure | `Error` | The available delivery fields and outcome; no `Payload` field |
+| `Retry` | `Error` | The same delivery fields plus `Payload` and the Handler or dependency exception when available |
+| `DeadLetter`, unknown route | `Error` | The available delivery fields, internal outcome, and actual-body `Payload`; Remoting also returns transport `Retry` with the `-1` delay sentinel |
+| `DeadLetter`, deserialization failure | `Error` | The available delivery fields and internal outcome; no `Payload` field; Remoting still returns transport `Retry` with the `-1` delay sentinel |
 
 Applications can change these effective levels through normal `Microsoft.Extensions.Logging` category filters. The
 adapter namespaces are the category prefixes.
@@ -186,8 +197,9 @@ always omits the message body. The complete field can contain sensitive data, so
 `EventBusLoggingOptions`, category filters, retention, and log access accordingly.
 
 An EventBus-selected `Retry` is an error in the first-release API because application handlers cannot request it
-explicitly; EventBus selects it only after a Handler or dependency failure. Consume timeout, delivery-scope lifecycle
-failure, and recoverable transport settlement failures belong to the underlying RocketMQ client and follow that
-client's logging categories and levels. The EventBus outcome log covers its dispatch call; if later scope disposal
-fails, the main client's error and retry handling describe the final delivery disposition. Normal Host-shutdown
-cancellation does not produce an EventBus `Retry` log.
+explicitly; EventBus selects it only after a Handler or dependency failure. An internal `DeadLetter` is still logged as
+`DeadLetter` even though the Remoting transport result is `Retry`; the `-1` context sentinel is the adapter's conditional
+PULL dead-letter request. Consume timeout, delivery-scope lifecycle failure, and recoverable transport settlement
+failures belong to the underlying RocketMQ client and follow that client's logging categories and levels. The EventBus
+outcome log covers its dispatch call; if later scope disposal fails, the main client's error and retry handling describe
+the final delivery disposition. Normal Host-shutdown cancellation does not produce an EventBus `Retry` log.
