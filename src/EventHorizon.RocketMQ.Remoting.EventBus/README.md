@@ -143,12 +143,17 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 Each message is deserialized once. All matching handlers run sequentially within one asynchronous DI scope, and the
 message succeeds only after every handler completes.
 
-| Condition | Remoting result |
+| Condition | Internal outcome and Remoting settlement |
 | --- | --- |
 | Route is known, payload is valid, and all handlers finish | `Success` |
-| A handler or application dependency fails | `Retry` |
-| Route is unknown or payload is invalid | `DeadLetter` |
+| A handler or application dependency fails | Internal `Retry`; returns `ConsumeResult.Retry` with the default delay level `0` |
+| Route is unknown or payload is invalid | Internal `DeadLetter`; sets `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1` and returns `ConsumeResult.Retry` |
 | Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result |
+
+The Remoting client 0.6.1 `ConsumeResult` enum has only `Success` and `Retry`; `DeadLetter` is an EventBus internal
+classification and log outcome, not a transport result. A negative delay-level sentinel requests direct DLQ only when
+the underlying receiver is concurrent PULL. POP normalizes the negative value to `0` and follows its normal retry
+progression, so EventBus does not promise immediate DLQ for every Remoting delivery mode.
 
 Serialization failures, transport send failures, and non-success Remoting send statuses use
 `EventBusPublishException`. Caller-requested cancellation remains an unwrapped `OperationCanceledException`.

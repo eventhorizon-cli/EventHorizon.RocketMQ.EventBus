@@ -119,17 +119,15 @@ internal static class RemotingEventBusLoggerExtensions
         EventBusLoggingSettings settings,
         IIntegrationEventSerializer serializer,
         EventBusDispatchResult result,
-        ConsumeResult outcome,
         RemotingMessageView message,
         TimeSpan duration)
     {
-        var level = outcome == ConsumeResult.Success ? LogLevel.Information : LogLevel.Error;
+        var level = result.Outcome == EventBusDispatchOutcome.Success ? LogLevel.Information : LogLevel.Error;
         Write(logger, settings, level, () => WriteConsumeCompleted(
             logger,
             settings,
             serializer,
             result,
-            outcome,
             message,
             duration));
     }
@@ -154,7 +152,6 @@ internal static class RemotingEventBusLoggerExtensions
         EventBusLoggingSettings settings,
         IIntegrationEventSerializer serializer,
         EventBusDispatchResult result,
-        ConsumeResult outcome,
         RemotingMessageView message,
         TimeSpan duration)
     {
@@ -169,24 +166,27 @@ internal static class RemotingEventBusLoggerExtensions
                 message.QueueId,
                 message.QueueOffset,
                 message.DeliveryAttempt,
-                outcome.ToString(),
+                result.Outcome.ToString(),
                 duration);
             return;
         }
 
-        switch (outcome)
+        switch (result.Outcome)
         {
-            case ConsumeResult.Success:
+            case EventBusDispatchOutcome.Success:
                 WriteSucceeded();
                 return;
-            case ConsumeResult.Retry:
+            case EventBusDispatchOutcome.Retry:
                 WriteRetry();
                 return;
-            case ConsumeResult.DeadLetter:
+            case EventBusDispatchOutcome.DeadLetter:
                 WriteDeadLetter();
                 return;
             default:
-                throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown Remoting consume result.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(result),
+                    result.Outcome,
+                    "Unknown EventBus dispatch outcome.");
         }
 
         void WriteSucceeded()
@@ -202,7 +202,7 @@ internal static class RemotingEventBusLoggerExtensions
                     message.QueueId,
                     message.QueueOffset,
                     message.DeliveryAttempt,
-                    outcome.ToString(),
+                    nameof(EventBusDispatchOutcome.Success),
                     duration,
                     FormatPayload(serializer, result, message.Body));
                 return;
@@ -217,7 +217,7 @@ internal static class RemotingEventBusLoggerExtensions
                 message.QueueId,
                 message.QueueOffset,
                 message.DeliveryAttempt,
-                outcome.ToString(),
+                nameof(EventBusDispatchOutcome.Success),
                 duration);
         }
 
@@ -235,7 +235,7 @@ internal static class RemotingEventBusLoggerExtensions
                     message.QueueId,
                     message.QueueOffset,
                     message.DeliveryAttempt,
-                    outcome.ToString(),
+                    nameof(EventBusDispatchOutcome.Retry),
                     duration,
                     FormatPayload(serializer, result, message.Body));
                 return;
@@ -251,7 +251,7 @@ internal static class RemotingEventBusLoggerExtensions
                 message.QueueId,
                 message.QueueOffset,
                 message.DeliveryAttempt,
-                outcome.ToString(),
+                nameof(EventBusDispatchOutcome.Retry),
                 duration);
         }
 
@@ -268,7 +268,7 @@ internal static class RemotingEventBusLoggerExtensions
                     message.QueueId,
                     message.QueueOffset,
                     message.DeliveryAttempt,
-                    outcome.ToString(),
+                    nameof(EventBusDispatchOutcome.DeadLetter),
                     duration,
                     EventBusPayloadJsonFormatter.Format(message.Body));
                 return;
@@ -283,7 +283,7 @@ internal static class RemotingEventBusLoggerExtensions
                 message.QueueId,
                 message.QueueOffset,
                 message.DeliveryAttempt,
-                outcome.ToString(),
+                nameof(EventBusDispatchOutcome.DeadLetter),
                 duration);
         }
     }

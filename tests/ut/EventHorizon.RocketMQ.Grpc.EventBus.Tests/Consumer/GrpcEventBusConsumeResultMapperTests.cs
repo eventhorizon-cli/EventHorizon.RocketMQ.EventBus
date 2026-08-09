@@ -3,12 +3,12 @@ namespace EventHorizon.RocketMQ.Grpc.EventBus.Tests.Consumer;
 public sealed class GrpcEventBusConsumeResultMapperTests
 {
     [Theory]
-    [InlineData("Success", ConsumeResult.Success)]
-    [InlineData("Retry", ConsumeResult.Failure)]
-    [InlineData("DeadLetter", ConsumeResult.Failure)]
+    [InlineData("Success", true)]
+    [InlineData("Retry", false)]
+    [InlineData("DeadLetter", false)]
     public void Map_KnownEventBusOutcome_ReturnsSupportedGrpcResult(
         string outcomeName,
-        ConsumeResult expected)
+        bool succeeds)
     {
         var outcomeType = typeof(IEventBus).Assembly.GetType(
             "EventHorizon.RocketMQ.EventBus.Internal.Dispatching.EventBusDispatchOutcome",
@@ -19,8 +19,9 @@ public sealed class GrpcEventBusConsumeResultMapperTests
         var outcome = Enum.Parse(outcomeType, outcomeName);
 
         var result = (ConsumeResult)mapper.Invoke(null, [outcome])!;
+        var expected = succeeds ? ConsumeResult.Success : ConsumeResult.Failure;
 
-        Assert.Equal(expected, result);
+        Assert.Same(expected, result);
     }
 
     [Fact]

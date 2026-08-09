@@ -70,11 +70,18 @@ public sealed class AdapterBoundaryTests
     }
 
     [Fact]
-    public void ConsumeResult_IndependentTransportPackages_ExposeProtocolSpecificValues()
+    public void ConsumeResult_IndependentTransportPackages_ExposeProtocolSpecificShapes()
     {
         Assert.NotEqual(typeof(GrpcConsumeResult), typeof(RemotingConsumeResult));
-        Assert.Equal(["Success", "Failure"], Enum.GetNames<GrpcConsumeResult>());
-        Assert.Equal(["Success", "Retry", "DeadLetter"], Enum.GetNames<RemotingConsumeResult>());
+        Assert.False(typeof(GrpcConsumeResult).IsEnum);
+        Assert.True(typeof(RemotingConsumeResult).IsEnum);
+        Assert.Equal("Success", GrpcConsumeResult.Success.ToString());
+        Assert.Equal("Failure", GrpcConsumeResult.Failure.ToString());
+        Assert.Null(GrpcConsumeResult.Success.SuspendDuration);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(50),
+            GrpcConsumeResult.Suspend(TimeSpan.FromMilliseconds(50)).SuspendDuration);
+        Assert.Equal(["Success", "Retry"], Enum.GetNames<RemotingConsumeResult>());
     }
 
     private sealed class SharedOrderEvent : IntegrationEvent

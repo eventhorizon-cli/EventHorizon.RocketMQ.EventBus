@@ -7,10 +7,14 @@
 业务 Handler 不返回 `ConsumeResult`，只返回 `Task`。EventBus 会综合路由查找、反序列化以及全部 Handler 的执行
 结果，得出一个内部结果。
 
-两个传输包有意使用不同的结果值：
+两个传输包有意使用不同的结果契约：
 
-- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`：`Success`、`Failure`
-- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`：`Success`、`Retry`、`DeadLetter`
+- `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`（gRPC 客户端 [`grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)）是 sealed record，包含 `Success`、`Failure`
+  结果以及 `Suspend(TimeSpan)` 工厂方法。EventBus 使用普通 Push 契约，只会发出 `Success` 或 `Failure`；`Suspend`
+  是 LitePush 能力，EventBus 不会发出它。
+- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`（Remoting 客户端 [`remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)）是只包含 `Success` 和 `Retry`
+  的枚举，没有 `DeadLetter` 成员。Remoting 的直接死信请求通过下文的
+  `RemotingPushConsumeContext` 延迟级别哨兵值表达。
 
 EventBus 对两种协议使用相同的路由、消息体和 Handler 分类规则，再把内部判断映射到所属传输层支持的结果。因此，
 两种协议最终执行的消息处置并不完全相同。
@@ -34,9 +38,12 @@ gRPC 适配器显式映射             Remoting 适配器显式映射
 Grpc.Consumer.ConsumeResult    Remoting.Consumer.ConsumeResult
 ```
 
-内部结果保留三种语义，但不是面向应用的公开契约。两个适配器分别通过显式 `switch` 映射到自己的传输层枚举。
-Remoting 保留全部三个结果；gRPC 的公开 Push Handler 没有直接死信结果，因此内部 `Retry` 与 `DeadLetter` 都映射为
-`Failure`。这里不能依赖整数值直接转换；适配器单元测试会锁定每个映射，避免主 Client 独立演进时静默改变行为。
+内部结果保留三种语义，但不是面向应用的公开契约。两个适配器分别通过显式 `switch` 映射到自己的传输层结果。
+gRPC 的公开 Push Handler 没有直接死信结果，因此内部 `Retry` 与 `DeadLetter` 都映射为 `Failure`。Remoting 把
+内部 `Success` 映射为 `ConsumeResult.Success`，把两个失败状态都映射为 `ConsumeResult.Retry`；只有内部
+`DeadLetter` 还会设置 `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`。普通 `Retry` 保持该属性的默认值
+`0`。适配器不能依赖整数值直接转换；Unit Test 会锁定结果映射和 Remoting 上下文副作用，避免主 Client 独立演进时
+静默改变行为。
 
 这样，`EventHorizon.RocketMQ.EventBus` 不需要引用 gRPC 或 Remoting，两个适配器也不会相互依赖。应用可以同时
 引用两个包，不会在已经编译完成的适配器内部产生类型冲突。如果应用自己的代码同时导入两个传输层 Consumer
@@ -61,8 +68,10 @@ registration 使用主项目中的注册名暴露 keyed `IEventBus`。纯消费�
 | 底层 Consumer 正在停止，并取消本次投递 | 适配器不强制返回结果 | 取消会继续传给 Consumer，由它按协议完成正常停止和消息处置 |
 
 EventBus 捕获异常后绝不会返回 `Success`。未知路由和无效消息体会被归类为确定性的 `DeadLetter`，而不是暂时性的
-`Retry`。Remoting 会据此请求直接进入死信队列；gRPC 适配器只能返回 `Failure`，因此服务端仍可能重复投递，直到
-达到 Consumer Group 的最大消费次数。
+`Retry`。Remoting 适配器会保留这一内部分类并记录日志，设置延迟级别哨兵值，然后返回唯一可用的失败结果
+`ConsumeResult.Retry`。Remoting 客户端只有在底层接收器是并发 PULL 时才把负延迟解释为直接进入 DLQ；POP 会把它
+归一化为 `0`，按正常重试进度处理。gRPC 适配器只能返回 `Failure`，因此服务端仍可能重复投递，直到达到 Consumer
+Group 的最大消费次数。
 
 ## 处理流程
 
@@ -129,16 +138,17 @@ Host 停止与消费超时不同。Consumer 的停止 token 被取消时，适�
 
 ## 传输层如何处置结果
 
-`ConsumeResult` 表达 EventBus 的处理决定，真正与 Broker 交互的是底层客户端：
+`ConsumeResult` 是适配器发给客户端的处置信号，真正与 Broker 交互的是底层客户端：
 
 | EventBus 内部结果 | gRPC Push Consumer | Remoting Push Consumer |
 | --- | --- | --- |
-| `Success` | 确认消息 | 提交这一条消息 |
-| `Retry` | 返回 `Failure`；主 Client 安排重新投递，服务端重试策略决定最终结果 | 返回 `Retry`，并将这一条消息发回 Broker，延迟后重新投递 |
-| `DeadLetter` | 返回 `Failure`；Push 没有直接死信结果，服务端只会在达到 Group 最大消费次数后转入 DLQ | 返回 `DeadLetter`，并将这一条消息直接发送到 DLQ |
+| `Success` | 返回 `Success` 并确认消息 | 返回 `Success` 并提交这一条消息 |
+| `Retry` | 返回 `Failure`；主 Client 安排重新投递，服务端重试策略决定最终结果 | 返回 `Retry`，保持上下文延迟默认值 `0`，按正常延迟重新投递 |
+| `DeadLetter` | 返回 `Failure`，不请求直接进入 DLQ；底层 Push 客户端与服务端按实际重试/DLQ 策略处置 | 设置 `DelayLevelWhenNextConsume = -1` 并返回 `Retry`；并发 PULL 将负哨兵值解释为直接进入 DLQ，POP 将其归一化为 `0` 并按正常重试进度处理 |
 
-这里的差异是明确的协议边界。`DeadLetter` 仍用于 EventBus 的确定性分类和日志，但不表示 gRPC 消息会立刻进入
-DLQ。EventBus 不会为了绕过 gRPC Push 契约而调用内部转发 RPC，也不会自行增加类似 SimpleConsumer 的处置 API。
+这里的差异是明确的协议边界。`DeadLetter` 仍用于 EventBus 的确定性分类和日志，但它不是传输层枚举值，也不表示
+消息一定会立即进入 DLQ。EventBus 不会为了绕过 gRPC Push 契约而调用内部转发 RPC，也不会自行增加类似 SimpleConsumer
+的处置 API。Remoting 的直接 DLQ 同样只适用于并发 PULL；POP 总是把负哨兵值归一化为默认重试级别。
 
 Remoting EventBus 会固定 `ConsumeMessageBatchSize = 1`，因此批次级 `ConsumeResult` 和 `AckIndex` 规则不会在
 EventBus 中产生部分成功结果。网络层仍可一次预取多条消息，但每条消息都会独立进入 EventBus 分发。
@@ -146,19 +156,19 @@ EventBus 中产生部分成功结果。网络层仍可一次预取多条消息�
 当投递次数达到传输层配置的上限时，底层 Client 或服务端可以把失败投递转入 DLQ。这不会改变 EventBus 的分类或
 日志；重试次数和最终 DLQ 阈值属于传输层职责。
 
-如果确认、安排重试或 Remoting 直接转发死信失败，底层 Client 仍可能重新投递消息。因此，即使返回 `Success`，
-也不代表 exactly-once 投递。
+如果确认、安排重试或 Remoting 条件性的直接死信处置失败，底层 Client 仍可能重新投递消息。因此，即使返回
+`Success`，也不代表 exactly-once 投递。
 
 ## 日志
 
-适配器使用结构化字段记录最终结果，其中包括 JSON 格式的完整 `Payload`：
+适配器使用结构化字段记录最终内部结果，其中包括 JSON 格式的完整 `Payload`：
 
-| 结果 | 默认级别 | 附加信息 |
+| 内部结果 | 默认级别 | 附加信息 |
 | --- | --- | --- |
 | `Success` | `Information` | Topic、Tag、Message ID、Broker 名称、Queue ID、Queue Offset、投递次数、耗时和 `Payload` |
-| EventBus `Retry` | `Error` | 相同的投递字段、`Payload`，以及可以获得的 Handler 或依赖异常 |
-| `DeadLetter`，路由未知 | `Error` | 可以获得的投递字段、结果，以及来自实际 Body 的 `Payload` |
-| `DeadLetter`，反序列化失败 | `Error` | 可以获得的投递字段和结果；不包含 `Payload` 字段 |
+| `Retry` | `Error` | 相同的投递字段、`Payload`，以及可以获得的 Handler 或依赖异常 |
+| `DeadLetter`，路由未知 | `Error` | 可以获得的投递字段、内部结果，以及来自实际 Body 的 `Payload`；Remoting 同时返回传输层 `Retry` 并设置 `-1` 哨兵值 |
+| `DeadLetter`，反序列化失败 | `Error` | 可以获得的投递字段和内部结果；不包含 `Payload` 字段；Remoting 仍返回传输层 `Retry` 并设置 `-1` 哨兵值 |
 
 应用可以通过标准的 `Microsoft.Extensions.Logging` 日志分类过滤规则改变实际输出级别。适配器命名空间就是
 日志分类前缀。
@@ -168,7 +178,8 @@ Body，非 JSON 字节使用 Base64 JSON 包装；反序列化失败时始终省
 必须配置适当的 `EventBusLoggingOptions`、分类过滤、保留周期和日志访问权限。
 
 在首版 API 中，EventBus 自己选择的 `Retry` 属于错误，因为业务 Handler 不能主动请求重试；EventBus 只会在
-Handler 或依赖失败后选择它。消费超时、投递 Scope 生命周期失败，以及可恢复的传输层处置失败都属于底层
-RocketMQ 客户端职责，并遵循主客户端自己的日志 category 和级别。EventBus 结果日志只描述其分发调用；如果随后
-释放 Scope 失败，最终投递处置应以主客户端的错误与重试日志为准。Host 正常停止所触发的取消不会产生 EventBus
-`Retry` 错误日志。
+Handler 或依赖失败后选择它。内部 `DeadLetter` 仍会按 `DeadLetter` 记录，即使 Remoting 传输结果是 `Retry`；`-1`
+上下文哨兵值只是适配器向并发 PULL 请求直接死信的方式。消费超时、投递 Scope 生命周期失败，以及可恢复的传输层
+处置失败都属于底层 RocketMQ 客户端职责，并遵循主客户端自己的日志 category 和级别。EventBus 结果日志只描述其
+分发调用；如果随后释放 Scope 失败，最终投递处置应以主客户端的错误与重试日志为准。Host 正常停止所触发的取消
+不会产生 EventBus `Retry` 错误日志。

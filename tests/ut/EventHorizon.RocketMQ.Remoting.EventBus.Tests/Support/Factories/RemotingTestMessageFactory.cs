@@ -23,6 +23,7 @@ internal static class RemotingTestMessageFactory
             typeof(long),
             typeof(DateTimeOffset),
             typeof(DateTimeOffset),
+            typeof(int),
         ],
         modifiers: null) ?? throw new InvalidOperationException("Unable to find the Remoting message constructor.");
 
@@ -66,6 +67,7 @@ internal static class RemotingTestMessageFactory
             0L,
             DateTimeOffset.UnixEpoch,
             DateTimeOffset.UnixEpoch,
+            0,
         ]);
 
     internal static byte[] Serialize(IntegrationEvent integrationEvent) =>

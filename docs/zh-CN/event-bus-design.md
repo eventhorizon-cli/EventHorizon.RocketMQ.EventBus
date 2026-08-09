@@ -55,7 +55,9 @@ EventHorizon.RocketMQ.Remoting                EventHorizon.RocketMQ.Grpc
 两个传输适配器不会相互引用。应用只需安装其实际使用的 RocketMQ 协议适配器。
 
 传输层各自定义的 `ConsumeResult` 不会进入 EventBus 公开 API。公共分发流程只产生内部的传输无关结果，再由每个
-适配器显式映射到其主项目包中的枚举。详见 [`ConsumeResult` 处理设计](consume-result-design.md#包边界)。
+适配器显式映射到其主项目包中的结果契约。已发布的 gRPC 客户端提供 sealed record（`Success`、`Failure` 和仅供
+LitePush 使用的 `Suspend`），已发布的 Remoting 客户端提供只包含 `Success`、`Retry` 的枚举；结果映射以及 Remoting
+PULL/POP 的处置差异见 [`ConsumeResult` 处理设计](consume-result-design.md#包边界)。
 
 ### NuGet 发布方式
 
@@ -606,8 +608,8 @@ HostedService 也可以避免 EventBus 适配器再创建一套重复的后台�
 | 发布失败或返回非成功结果 | `Error` | Topic、Tag、耗时、异常或传输结果，以及可以生成时的 `Payload` |
 | Consumer 分发结果为 `Success` | `Information` | Topic、Tag、Message ID、Broker 名称、Queue ID、Queue Offset、投递次数、耗时、结果和 `Payload` |
 | Handler 或依赖失败后，EventBus 请求 `Retry` | `Error` | 相同的投递字段、重试结果、可以获得的异常和 `Payload` |
-| Consumer 因路由未知选择 `DeadLetter` | `Error` | 可获得的投递字段、结果，以及来自实际 Body 的 `Payload` |
-| Consumer 因反序列化失败选择 `DeadLetter` | `Error` | 可获得的投递字段和结果；不包含 `Payload` 字段 |
+| EventBus 因路由未知分类为内部 `DeadLetter` | `Error` | 可获得的投递字段、内部结果，以及来自实际 Body 的 `Payload`；Remoting 以 `Retry` 和条件性的 `-1` 延迟哨兵值处置 |
+| EventBus 因反序列化失败分类为内部 `DeadLetter` | `Error` | 可获得的投递字段和内部结果；不包含 `Payload` 字段；Remoting 仍以 `Retry` 和条件性的 `-1` 延迟哨兵值处置 |
 
 消费超时和投递 Scope 生命周期失败由主客户端负责处理与记录。它们可能在 EventBus 分发调用已经返回或被放弃后
 触发传输层重试，因此不会再生成一个新的 EventBus 结果。
@@ -677,9 +679,10 @@ EventBus 会为每次完成的分发尝试给出以下内部结果：
 | 收到的 Topic 与 Tag 没有匹配事件 | `DeadLetter` |
 | Host 停止并取消本次投递 | 继续传播取消，不强制生成新结果 |
 
-协议适配器再把内部分类映射到主 Client 的结果。Remoting 保留三个结果；gRPC 将 `Retry` 和 `DeadLetter` 都映射为
-`Failure`，消息只有在达到 Consumer Group 的重试上限后才由服务端转入 DLQ。完整映射见
-[`ConsumeResult` 处理设计](consume-result-design.md)。
+协议适配器再把内部分类映射到主 Client 的结果。gRPC 将 `Retry` 和 `DeadLetter` 都映射为 `Failure`，EventBus
+不会发出 `Suspend`。Remoting 将内部 `Success` 映射为 `Success`，把两个失败状态都映射为 `Retry`。内部
+`DeadLetter` 还会设置 `DelayLevelWhenNextConsume = -1`；只有并发 PULL 会把这个哨兵值解释为直接进入 DLQ，POP 会将
+其归一化为 `0` 并按正常重试进度处理。完整映射见 [`ConsumeResult` 处理设计](consume-result-design.md)。
 
 两个适配器都不提供 exactly-once 投递。重试可能与忽略取消信号的 Handler 重叠；多个 Handler 中已经执行成功的
 部分也可能再次执行。消费端必须保证副作用幂等。
@@ -795,8 +798,10 @@ README 保持协议无关，并链接到两个适配器。本仓库使用 MIT Li
    Topic 只要包含无 Tag 路由，Consumer 就使用 `*` 过滤表达式。
 3. 每个具体集成事件类型都必须提供公开无参构造函数。注册过程使用它发现路由，无需 Attribute、static
    abstract 成员或应用服务。
-4. Handler 失败时产生内部 `Retry`；反序列化失败和未知路由产生内部 `DeadLetter`。Remoting 可以请求立即进入
-   DLQ；gRPC 会把两类失败都映射为 `Failure`，由服务端重试次数与 DLQ 阈值决定最终处置。
+4. Handler 失败时产生内部 `Retry`；反序列化失败和未知路由产生内部 `DeadLetter`。Remoting 把两个失败状态都映射
+   为 `Retry`；对于 `DeadLetter` 还会设置 `DelayLevelWhenNextConsume = -1`，该哨兵值只会在并发 PULL 时请求直接
+   进入 DLQ，POP 会将其归一化。gRPC 会把两类失败都映射为 `Failure`，由底层 Push 客户端与服务端按实际重试/DLQ
+   策略完成最终处置。
 5. EventBus 每次调用只反序列化并分发一条消息，同时保留可配置的传输预取和消费并发度；Remoting Handler
    批量回调固定为 1。
 6. 公开命名使用 `EventHorizon.RocketMQ.EventBus`、`IntegrationEvent` 和

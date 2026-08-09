@@ -130,9 +130,10 @@ message succeeds only after every handler completes.
 | Route is unknown or payload is invalid | `Failure` |
 | Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result |
 
-The gRPC Push handler has no separate dead-letter return value. EventBus logs an unknown route or invalid payload as
-`DeadLetter`, but returns gRPC `Failure`; RocketMQ moves the message to the DLQ only after the consumer group's retry
-limit is reached.
+The gRPC client 0.4.1 `ConsumeResult` is a sealed record. EventBus uses regular Push and emits only `Success` or
+`Failure`; it never emits the LitePush-only `Suspend` result. EventBus logs an unknown route or invalid payload as
+`DeadLetter`, but returns `Failure` without requesting direct DLQ placement. The underlying Push client and service own
+the effective retry and eventual DLQ policy.
 
 Serialization and send failures use `EventBusPublishException`. Caller-requested cancellation remains an unwrapped
 `OperationCanceledException`.
