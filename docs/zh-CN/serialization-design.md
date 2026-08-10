@@ -9,7 +9,11 @@
 ## 消息格式
 
 默认 `NewtonsoftJsonIntegrationEventSerializer` 按事件的实际具体类型生成紧凑 JSON，再编码成不带 BOM 的
-UTF-8。反序列化使用严格的 UTF-8 解码；无效字节序列属于无效消息，并返回 `DeadLetter`。
+UTF-8。反序列化使用严格的 UTF-8 解码；无效字节序列属于无效消息。EventBus 会以 `Error` 级别记录失败，不会调用
+业务 Handler，并按对应适配器自有 Consumer 配置类型的 `SkipDeserializationFailures` 属性处理。
+`GrpcEventBusConsumerOptions` 与 `RemotingEventBusConsumerOptions` 的默认值都是 `true`：返回带有
+`DeserializationFailed` 诊断标记的内部 `Success` 并确认消息；设为 `false` 则返回普通 `Retry`。两种路径都不会请求直接
+进入 DLQ。
 
 消息 Body 只包含应用事件数据：
 
@@ -52,8 +56,10 @@ Core 创建并独占序列化设置，不读取或修改 `JsonConvert.DefaultSet
 再填充应用成员。序列化器返回值不能是 `null`，并且必须与请求的已注册事件类型完全一致；即使其他类型可以赋值
 给它，也按无效结果处理。
 
-UTF-8 解码、JSON 解析、构造函数执行、成员类型转换、最大读取深度和返回类型校验都属于反序列化阶段。任何一步
-失败都会在调用业务 Handler 之前返回 `DeadLetter`，具体规则见 [`ConsumeResult` 处理设计](consume-result-design.md)。
+UTF-8 解码、JSON 解析、构造函数执行、成员类型转换、最大读取深度和返回类型校验都属于反序列化阶段。任何一步失败
+都会在调用业务 Handler 之前，按对应适配器自有 Consumer 配置类型的 `SkipDeserializationFailures` 处理：默认跳过策略返回带有
+`DeserializationFailed` 的内部 `Success`，禁用跳过则请求普通 `Retry`。适配器绝不请求直接进入 DLQ；完整结果映射见
+[`ConsumeResult` 处理设计](consume-result-design.md)。
 
 发布时发生序列化失败，会记录 `Error` 日志、包装成 `EventBusPublishException`，并通过 `PublishAsync` 向调用方传播，
 不会尝试调用传输层发送。
@@ -115,7 +121,7 @@ Newtonsoft.Json 生成可读的单行 JSON 视图；传输字节仍然只由自�
 ## 兼容性测试
 
 Core 单元测试使用固定消息样本验证属性名、紧凑 UTF-8 字节、Null/默认值、缺失/新增字段、最大读取深度、忽略类型
-元数据、进程默认设置隔离，以及排除 `Topic` 和 `Tag`。
+元数据、进程默认设置隔离、排除 `Topic` 和 `Tag`，以及 registration 级的反序列化失败策略。
 
 两个适配器的 Unit Test 分别验证各自默认 JSON 发布与消费路径，也验证应用替换的自定义序列化器会控制双向传输
 字节，而日志字段使用内置 Newtonsoft.Json 诊断视图。跨包 Compatibility Test 验证适配器公开边界的对称性，以及

@@ -51,7 +51,7 @@ public sealed class AdapterBoundaryTests
     }
 
     [Fact]
-    public void AddEventBus_PublicExtensionShapesRemainSymmetric()
+    public void AddEventBus_PublicExtensionShapesUseSymmetricAdapterOwnedOptions()
     {
         var grpc = typeof(GrpcEventBusBuilderExtensions).GetMethod(nameof(GrpcEventBusBuilderExtensions.AddGrpcEventBus))!;
         var remoting = typeof(RemotingEventBusBuilderExtensions).GetMethod(
@@ -67,6 +67,10 @@ public sealed class AdapterBoundaryTests
             remoting.GetParameters().Select(static parameter => parameter.Name));
         Assert.All(grpc.GetParameters().Skip(1), static parameter => Assert.True(parameter.HasDefaultValue));
         Assert.All(remoting.GetParameters().Skip(1), static parameter => Assert.True(parameter.HasDefaultValue));
+        Assert.Equal(typeof(Action<GrpcEventBusConsumerOptions>), grpc.GetParameters()[1].ParameterType);
+        Assert.Equal(typeof(Action<GrpcEventBusProducerOptions>), grpc.GetParameters()[2].ParameterType);
+        Assert.Equal(typeof(Action<RemotingEventBusConsumerOptions>), remoting.GetParameters()[1].ParameterType);
+        Assert.Equal(typeof(Action<RemotingEventBusProducerOptions>), remoting.GetParameters()[2].ParameterType);
     }
 
     [Fact]

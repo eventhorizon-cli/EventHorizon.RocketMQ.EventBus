@@ -10,7 +10,11 @@ must produce and consume identical message-body bytes for the same integration e
 
 The default `NewtonsoftJsonIntegrationEventSerializer` serializes the concrete runtime event type to compact JSON and
 encodes it as UTF-8 without a byte-order mark. Deserialization uses strict UTF-8 decoding; malformed byte sequences are
-an invalid payload and produce `DeadLetter`.
+an invalid payload. EventBus logs the failure at `Error`, invokes no application handler, and follows the matching
+adapter-owned consumer wrapper's `SkipDeserializationFailures` policy. Both `GrpcEventBusConsumerOptions` and
+`RemotingEventBusConsumerOptions` default it to `true`, which returns internal `Success` with a `DeserializationFailed`
+diagnostic and acknowledges the delivery; setting it to `false` returns ordinary `Retry`. Neither path requests direct DLQ
+placement.
 
 The message body contains only application event data:
 
@@ -57,8 +61,10 @@ non-null and must have exactly the requested registered event type. A different 
 assignable.
 
 UTF-8 decoding, JSON parsing, constructor execution, member conversion, maximum-read-depth checks, and returned-type
-checks all belong to the deserialization phase. Any failure returns `DeadLetter` before an application handler is
-invoked, as defined by the [`ConsumeResult` handling design](consume-result-design.md).
+checks all belong to the deserialization phase. Any failure is handled before an application handler is invoked according
+to the matching adapter-owned consumer wrapper's `SkipDeserializationFailures`: the default skip policy returns internal
+`Success` with `DeserializationFailed`, while disabling it requests ordinary `Retry`. The adapters never request direct DLQ placement;
+the complete result mapping is defined by the [`ConsumeResult` handling design](consume-result-design.md).
 
 On publish, serialization failures are logged at `Error`, wrapped in `EventBusPublishException`, and propagated from
 `PublishAsync`; no transport send is attempted. Newtonsoft.Json does not expose a matching `JsonSerializerSettings`
@@ -126,9 +132,9 @@ accordingly.
 
 ## Compatibility tests
 
-Core unit tests use fixed payload fixtures to verify property names, compact UTF-8 bytes, null/default handling,
-missing and additional fields, maximum read depth, ignored type metadata, process-default isolation, and the exclusion
-of `Topic` and `Tag`.
+Core unit tests use fixed payload fixtures to verify property names, compact UTF-8 bytes, null/default handling, missing
+and additional fields, maximum read depth, ignored type metadata, process-default isolation, the exclusion of `Topic` and
+`Tag`, and the registration-local deserialization-failure policy.
 
 Each adapter's unit suite verifies its default JSON publish and consume paths independently. Those suites also verify
 that custom serializer replacement controls transport bytes in both directions while the log field uses the built-in

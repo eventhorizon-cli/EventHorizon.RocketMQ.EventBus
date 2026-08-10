@@ -18,8 +18,6 @@ public sealed class RemotingEventBusConsumerConfigurationTests
         _ = provider.GetRequiredService<IRemotingPushConsumer>();
 
         var options = Assert.IsType<RemotingPushConsumerOptions>(capturedOptions);
-        Assert.Equal(ConsumerMode.Clustering, options.ConsumerMode);
-        Assert.Equal(1, options.ConsumeMessageBatchSize);
         var subscription = Assert.Single(options.Subscriptions);
         Assert.Equal("orders", subscription.Key);
         Assert.Equal("cancelled || submitted", subscription.Value.Expression);
@@ -37,7 +35,6 @@ public sealed class RemotingEventBusConsumerConfigurationTests
             {
                 options.GroupName = "orders-consumer";
                 options.PullBatchSize = 48;
-                options.ConsumeMessageBatchSize = 12;
             })
             .AddHandler<RemotingTestHandler>();
         services.PostConfigureAll<RemotingPushConsumerOptions>(options => capturedOptions = options);
@@ -92,67 +89,6 @@ public sealed class RemotingEventBusConsumerConfigurationTests
         Assert.Equal("orders", subscription.Key);
         Assert.Equal("*", subscription.Value.Expression);
         Assert.Equal(FilterExpressionType.Tag, subscription.Value.Type);
-    }
-
-    [Fact]
-    public async Task FirstHandler_RejectsBroadcastingMode()
-    {
-        var services = new ServiceCollection();
-        services
-            .AddRocketMQRemoting(options => options.NamesrvAddr = "127.0.0.1:9876")
-            .AddRemotingEventBus(options =>
-            {
-                options.GroupName = "orders-consumer";
-                options.ConsumerMode = ConsumerMode.Broadcasting;
-            })
-            .AddHandler<RemotingTestHandler>();
-
-        await using var provider = services.BuildServiceProvider();
-
-        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IRemotingPushConsumer>());
-
-        Assert.Contains("clustering", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task FirstHandler_RejectsManualSubscriptions()
-    {
-        var services = new ServiceCollection();
-        services
-            .AddRocketMQRemoting(options => options.NamesrvAddr = "127.0.0.1:9876")
-            .AddRemotingEventBus(options =>
-            {
-                options.GroupName = "orders-consumer";
-                options.Subscribe("manual", new FilterExpression("manual"));
-            })
-            .AddHandler<RemotingTestHandler>();
-
-        await using var provider = services.BuildServiceProvider();
-
-        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IRemotingPushConsumer>());
-
-        Assert.Contains("owns Push consumer subscriptions", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task FirstHandler_RejectsOrderlyConsumption()
-    {
-        var services = new ServiceCollection();
-        services
-            .AddRocketMQRemoting(options => options.NamesrvAddr = "127.0.0.1:9876")
-            .AddRemotingEventBus(options =>
-            {
-                options.GroupName = "orders-consumer";
-                options.ConsumeOrderly = true;
-            })
-            .AddHandler<RemotingTestHandler>();
-
-        await using var provider = services.BuildServiceProvider();
-
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            provider.GetRequiredService<IRemotingPushConsumer>());
-
-        Assert.Contains("orderly", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

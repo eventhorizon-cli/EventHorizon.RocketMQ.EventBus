@@ -39,7 +39,7 @@ internal static class GrpcEventBusRegistration
     internal static void AddPushConsumer(
         GrpcRocketMQBuilder builder,
         EventBusRegistration registration,
-        Action<GrpcPushConsumerOptions>? configureConsumer)
+        GrpcEventBusConsumerOptions consumerOptions)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(registration);
@@ -48,7 +48,7 @@ internal static class GrpcEventBusRegistration
         {
             AddPushConsumerMethod
                 .MakeGenericMethod(registration.ConsumerAnchorHandlerType)
-                .Invoke(null, [builder, registration, configureConsumer]);
+                .Invoke(null, [builder, registration, consumerOptions]);
         }
         catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {
@@ -60,15 +60,16 @@ internal static class GrpcEventBusRegistration
     private static void AddPushConsumerCore<TAnchorHandler>(
         GrpcRocketMQBuilder builder,
         EventBusRegistration registration,
-        Action<GrpcPushConsumerOptions>? configureConsumer)
+        GrpcEventBusConsumerOptions consumerOptions)
         where TAnchorHandler : class
     {
+        ArgumentNullException.ThrowIfNull(consumerOptions);
         var optionsMarker = new GrpcEventBusConsumerOptionsMarker();
         builder.AddGrpcPushConsumer<GrpcIntegrationEventBusHandler<TAnchorHandler>>(
             ServiceLifetime.Scoped,
             options =>
             {
-                configureConsumer?.Invoke(options);
+                consumerOptions.ApplyTo(options);
                 optionsMarker.Mark(options);
             });
 

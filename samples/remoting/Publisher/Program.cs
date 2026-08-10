@@ -21,12 +21,14 @@ builder.Services.AddSwaggerGen(static options => options.SwaggerDoc("v1", new Op
 
 builder.Services
     .AddRocketMQRemoting(options => options.NamesrvAddr = nameserver)
+    // EventBus publishing is non-transactional; producer options only cover ordinary send settings.
     .AddRemotingEventBus(configureProducer: options =>
     {
         options.GroupName = "eventbus-remoting-sample-publisher";
     });
 builder.Services
     .AddRocketMQRemoting(ordersRegistrationName, options => options.NamesrvAddr = nameserver)
+    // The named registration is isolated but follows the same non-transactional producer contract.
     .AddRemotingEventBus(configureProducer: options => options.GroupName = "eventbus-remoting-orders-publisher");
 
 var app = builder.Build();

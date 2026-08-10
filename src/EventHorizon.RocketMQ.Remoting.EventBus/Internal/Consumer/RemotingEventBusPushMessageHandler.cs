@@ -37,12 +37,6 @@ internal sealed class RemotingEventBusPushMessageHandler<TAnchorHandler>(
                 message.Body,
                 cancellationToken).ConfigureAwait(false);
             var consumeResult = RemotingEventBusDispatchOutcomeMapper.Map(dispatchResult.Outcome);
-            if (dispatchResult.Outcome == EventBusDispatchOutcome.DeadLetter)
-            {
-                // Concurrent PULL treats a negative delay as direct DLQ; POP normalizes it to its official retry path.
-                context.DelayLevelWhenNextConsume = -1;
-            }
-
             _logger.LogEventBusConsumeCompleted(
                 loggingSettings,
                 _registrationAccessor.Serializer,

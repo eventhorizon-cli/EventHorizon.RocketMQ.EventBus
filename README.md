@@ -76,7 +76,11 @@ Register the gRPC adapter and scan the application assembly:
 builder.Services
     .AddRocketMQGrpc(options => options.Endpoint = "http://localhost:8081")
     .AddGrpcEventBus(
-        configureConsumer: options => options.GroupName = "ordering-service",
+        configureConsumer: options =>
+        {
+            options.GroupName = "ordering-service";
+            options.SkipDeserializationFailures = true; // default: log, skip, and acknowledge malformed payloads
+        },
         configureProducer: static _ => { })
     .AddHandlersFromAssemblyOf<Program>();
 ```
@@ -85,6 +89,8 @@ Use `AddRocketMQRemoting` and `AddRemotingEventBus` instead when connecting thro
 
 `configureProducer` enables publishing and registers `IEventBus`. Omit it for a consumer-only service. A Push consumer
 is added when the first handler is registered, so publisher-only services do not start an empty consumer.
+Both delegates receive protocol-owned EventBus option wrappers rather than raw client options. Producer wrappers cover
+ordinary send settings only; EventBus does not expose raw subscriptions or transaction topics and checkers.
 
 Publish through the default registration:
 
@@ -110,9 +116,21 @@ not written into the default JSON body.
 Serialization and send failures are reported as `EventBusPublishException`. Caller-requested cancellation remains an
 `OperationCanceledException`.
 
-For consumption, a message succeeds only after all matching handlers complete. Handler failures request retry;
-unknown routes and invalid payloads request dead-letter handling. The adapter maps those outcomes to the capabilities
-of its protocol client.
+For consumption, a message succeeds only after all matching handlers complete. Handler failures and unknown routes
+request ordinary retry. Configure the registration-local `SkipDeserializationFailures` property on the protocol-specific
+`GrpcEventBusConsumerOptions` or `RemotingEventBusConsumerOptions` wrapper passed to `configureConsumer`.
+
+`true` is the default. It logs the malformed payload at `Error` with an explicit skip action, omits the `Payload` field,
+invokes no handler, and acknowledges the message as `Success`. Setting it to `false` still invokes no handler, logs an
+explicit retry action, and requests ordinary retry.
+
+| Setting | Handler invocation | EventBus outcome | Protocol mapping and transport behavior |
+| --- | --- | --- | --- |
+| `true` (default) | None | `Success` | gRPC `Success`; Remoting `Success` and normal acknowledgement |
+| `false` | None | `Retry` | gRPC `Retry` -> `Failure`; Remoting `Retry` -> `Retry` with the default delay `0`; normal transport retry |
+
+EventBus never requests direct DLQ placement. Eventual retry and DLQ handling remain with the underlying client or
+service. The same `Retry` mapping applies to handler failures and unknown routes.
 
 ## Logging
 

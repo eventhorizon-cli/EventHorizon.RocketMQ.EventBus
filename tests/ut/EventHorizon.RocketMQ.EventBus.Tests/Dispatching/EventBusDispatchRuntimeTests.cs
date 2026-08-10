@@ -38,7 +38,7 @@ public sealed class EventBusDispatchRuntimeTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsDeadLetterForAnUnknownRoute()
+    public async Task DispatchAsync_UnknownRoute_ReturnsRetry()
     {
         var (services, registration) = CreateRegistration();
         registration.Builder.AddHandler<DispatchFirstHandler>();
@@ -48,10 +48,12 @@ public sealed class EventBusDispatchRuntimeTests
         var result = await registration.GetRequiredDispatcher(scope.ServiceProvider)
             .DispatchAsync("missing", "route", ReadOnlyMemory<byte>.Empty, TestContext.Current.CancellationToken);
 
-        Assert.Equal(EventBusDispatchOutcome.DeadLetter, result.Outcome);
+        Assert.Equal(EventBusDispatchOutcome.Retry, result.Outcome);
         Assert.Null(result.IntegrationEventType);
         Assert.Null(result.IntegrationEvent);
+        Assert.False(result.DeserializationFailed);
         Assert.Equal(0, result.HandlerCount);
+        Assert.Null(result.Exception);
     }
 
     [Fact]
@@ -74,7 +76,7 @@ public sealed class EventBusDispatchRuntimeTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsDeadLetterForAnInvalidPayloadWithoutInvokingAHandler()
+    public async Task DispatchAsync_InvalidPayloadWithDefaultPolicy_ReturnsSuccessWithoutInvokingAHandler()
     {
         var (services, registration) = CreateRegistration();
         var recorder = new DispatchRecorder();
@@ -86,14 +88,17 @@ public sealed class EventBusDispatchRuntimeTests
         var result = await registration.GetRequiredDispatcher(scope.ServiceProvider)
             .DispatchAsync("dispatch", "received", new byte[] { 0xff }, TestContext.Current.CancellationToken);
 
-        Assert.Equal(EventBusDispatchOutcome.DeadLetter, result.Outcome);
+        Assert.Equal(EventBusDispatchOutcome.Success, result.Outcome);
         Assert.Equal(typeof(DispatchEvent), result.IntegrationEventType);
+        Assert.Null(result.IntegrationEvent);
         Assert.True(result.DeserializationFailed);
+        Assert.Equal(1, result.HandlerCount);
+        Assert.Null(result.Exception);
         Assert.Empty(recorder.Entries);
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsDeadLetterWhenACustomSerializerReturnsTheWrongType()
+    public async Task DispatchAsync_CustomSerializerReturnsWrongTypeWithDefaultPolicy_ReturnsSuccessWithoutInvokingAHandler()
     {
         var (services, registration) = CreateRegistration();
         var recorder = new DispatchRecorder();
@@ -110,7 +115,30 @@ public sealed class EventBusDispatchRuntimeTests
         var result = await registration.GetRequiredDispatcher(scope.ServiceProvider)
             .DispatchAsync("dispatch", "received", ReadOnlyMemory<byte>.Empty, TestContext.Current.CancellationToken);
 
-        Assert.Equal(EventBusDispatchOutcome.DeadLetter, result.Outcome);
+        Assert.Equal(EventBusDispatchOutcome.Success, result.Outcome);
+        Assert.True(result.DeserializationFailed);
+        Assert.Empty(recorder.Entries);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_InvalidPayloadWithSkippingDisabled_ReturnsRetryWithoutInvokingAHandler()
+    {
+        var (services, registration) = CreateRegistration(skipDeserializationFailures: false);
+        var recorder = new DispatchRecorder();
+        services.AddSingleton(recorder);
+        registration.Builder.AddHandler<DispatchFirstHandler>();
+
+        using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var result = await registration.GetRequiredDispatcher(scope.ServiceProvider)
+            .DispatchAsync("dispatch", "received", new byte[] { 0xff }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(EventBusDispatchOutcome.Retry, result.Outcome);
+        Assert.Equal(typeof(DispatchEvent), result.IntegrationEventType);
+        Assert.Null(result.IntegrationEvent);
+        Assert.True(result.DeserializationFailed);
+        Assert.Equal(1, result.HandlerCount);
+        Assert.Null(result.Exception);
         Assert.Empty(recorder.Entries);
     }
 
@@ -200,7 +228,7 @@ public sealed class EventBusDispatchRuntimeTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ReturnsDeadLetterWhenTheAdapterSuppliesATypeThatDoesNotMatchTheRoute()
+    public async Task DispatchAsync_AdapterSuppliesTypeThatDoesNotMatchRoute_ReturnsRetry()
     {
         var (services, registration) = CreateRegistration();
         registration.Builder.AddHandler<DispatchFirstHandler>();
@@ -214,14 +242,18 @@ public sealed class EventBusDispatchRuntimeTests
             ReadOnlyMemory<byte>.Empty,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(EventBusDispatchOutcome.DeadLetter, result.Outcome);
+        Assert.Equal(EventBusDispatchOutcome.Retry, result.Outcome);
         Assert.Equal(typeof(OrderSubmittedEvent), result.IntegrationEventType);
     }
 
-    private static (ServiceCollection Services, EventBusRegistration Registration) CreateRegistration()
+    private static (ServiceCollection Services, EventBusRegistration Registration) CreateRegistration(
+        bool skipDeserializationFailures = true)
     {
         var services = new ServiceCollection();
-        return (services, EventBusRegistration.Create(services, null));
+        return (services, EventBusRegistration.Create(
+            services,
+            null,
+            skipDeserializationFailures: skipDeserializationFailures));
     }
 
     private static void ReplaceSerializer(

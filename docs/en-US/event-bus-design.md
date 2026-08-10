@@ -59,8 +59,8 @@ Transport-specific `ConsumeResult` types do not enter the public EventBus API. T
 internal transport-neutral outcome, and each adapter explicitly maps it to the result contract defined by its own
 main-client package. The released gRPC client exposes a sealed record (`Success`, `Failure`, and LitePush-only
 `Suspend`), while the released Remoting client exposes an enum with only `Success` and `Retry`; see the
-[`ConsumeResult` handling design](consume-result-design.md#package-boundary) for the adapter mappings and Remoting
-PULL/POP settlement distinction.
+[`ConsumeResult` handling design](consume-result-design.md#package-boundary) for the adapter mappings and
+transport-owned retry and terminal policy.
 
 ### NuGet distribution
 
@@ -149,7 +149,7 @@ EventBus contract.
 Core deliberately keeps consumer creation behind a transport-owned callback and keeps dispatch independent from the
 Push implementation. Classic Remoting POP is an internal receive engine of the same Push consumer, so it uses
 `AddRemotingEventBus`, the same bridge handler, and the same `(Topic, Tag)` route table. Applications may request
-Broker-owned queue assignment through `RemotingPushConsumerOptions`; each Broker assignment then determines whether
+Broker-owned queue assignment through `RemotingEventBusConsumerOptions`; each Broker assignment then determines whether
 the main client receives with PULL or POP. EventBus does not configure the Broker's topic-and-group request mode and
 does not own POP receipts or settlement.
 
@@ -283,16 +283,37 @@ The transport entry points are:
 ```csharp
 IEventBusBuilder AddRemotingEventBus(
     this RemotingRocketMQBuilder builder,
-    Action<RemotingPushConsumerOptions>? configureConsumer = null,
-    Action<RemotingProducerOptions>? configureProducer = null);
+    Action<RemotingEventBusConsumerOptions>? configureConsumer = null,
+    Action<RemotingEventBusProducerOptions>? configureProducer = null);
 
 IEventBusBuilder AddGrpcEventBus(
     this GrpcRocketMQBuilder builder,
-    Action<GrpcPushConsumerOptions>? configureConsumer = null,
-    Action<GrpcProducerOptions>? configureProducer = null);
+    Action<GrpcEventBusConsumerOptions>? configureConsumer = null,
+    Action<GrpcEventBusProducerOptions>? configureProducer = null);
 ```
 
-Remoting queue assignment is configured through the existing Push options rather than an EventBus mode:
+These are EventBus-owned protocol wrappers, not aliases for the main client's option classes. The public EventBus API
+never accepts or returns raw `GrpcPushConsumerOptions`, `RemotingPushConsumerOptions`, `GrpcProducerOptions`, or
+`RemotingProducerOptions`; each adapter validates an immutable wrapper snapshot and maps it internally to the matching
+main-client options. `EventBusLoggingOptions` remains a separate registration-local contract configured through
+`ConfigureLogging`.
+
+The wrappers intentionally expose a curated surface:
+
+| Wrapper | Public properties |
+| --- | --- |
+| `GrpcEventBusConsumerOptions` | `GroupName`, `MaxConcurrency`, `BatchSize`, `MaxCachedMessages`, `MaxCachedMessageBytes`, `MaxDeliveryAttempts`, `InvisibleDuration`, `ConsumeTimeout`, `LongPollingTimeout`, `RetryDelay`, `SkipDeserializationFailures` |
+| `RemotingEventBusConsumerOptions` | `GroupName`, `InitialPosition`, `ConsumeTimestamp`, `MaxConcurrency`, `PullBatchSize`, `PopBatchSize`, `PopInvisibleDuration`, `PopMaxInflightMessagesPerAssignment`, `PullMaxCachedMessages`, `PullMaxCachedMessageBytes`, `MaxMessageBytes`, `MaxDeliveryAttempts`, `LongPollingTimeout`, `RetryDelay`, `ConsumeTimeout`, `QueueAssignmentMode`, `SkipDeserializationFailures` |
+| `GrpcEventBusProducerOptions` | `SendMsgTimeout`, `RetryTimesWhenSendFailed`, `MaxMessageSize` |
+| `RemotingEventBusProducerOptions` | `GroupName`, `DefaultTopicQueueNums`, `SendMsgTimeout`, `CompressMsgBodyOverHowmuch`, `RetryTimesWhenSendFailed`, `MaxMessageSize` |
+
+`SkipDeserializationFailures` defaults to `true` in both consumer wrappers. EventBus always derives subscriptions from the
+registered `(Topic, Tag)` routes; wrapper delegates cannot add or replace `Subscribe` calls. Remoting EventBus supports
+clustering and concurrent consumption with one physical message per EventBus dispatch. Its wrapper does not expose
+orderly-consumption, broadcasting, or local-offset settings. Producer wrappers do not expose transaction callbacks;
+transactional publishing is outside the EventBus contract.
+
+Remoting queue assignment is configured through the EventBus-owned consumer wrapper rather than an EventBus mode:
 
 ```csharp
 builder.Services
@@ -440,6 +461,7 @@ builder.Services
     {
         options.GroupName = "ordering-service";
         options.MaxConcurrency = 8;
+        options.SkipDeserializationFailures = true;
     })
     .AddHandlersFromAssemblyOf<Program>();
 
@@ -461,6 +483,7 @@ builder.Services
     {
         options.GroupName = "ordering-service";
         options.MaxConcurrency = 8;
+        options.SkipDeserializationFailures = true;
     })
     .AddHandlersFromAssemblyOf<Program>();
 
@@ -548,7 +571,7 @@ members of the same Consumer Group send different subscription strings.
 
 The EventBus owns all Push-consumer subscriptions. Applications may configure group name, concurrency, retry, timeout,
 prefetch, and cache options, but must not call `Subscribe` inside `AddRemotingEventBus` or `AddGrpcEventBus`. The
-Remoting adapter rejects broadcasting and forces `ConsumeMessageBatchSize = 1`.
+Remoting adapter rejects orderly and broadcasting consumption and forces `ConsumeMessageBatchSize = 1`.
 
 ### Single-handler registration
 
@@ -653,8 +676,9 @@ that Consumer deserialization-failure entries omit the field.
 | Publish failed or returned a non-success result | `Error` | Topic, tag, duration, exception or transport result, and `Payload` when it can be produced |
 | Consumer dispatch completed with `Success` | `Information` | Topic, tag, message ID, Broker name, queue ID, queue offset, delivery attempt, duration, outcome, and `Payload` |
 | EventBus requested `Retry` after a Handler or dependency failure | `Error` | The same delivery fields, retry outcome, exception when available, and `Payload` |
-| EventBus classified an internal `DeadLetter` because the route was unknown | `Error` | The available delivery fields, internal outcome, and actual-body `Payload`; Remoting settles with `Retry` plus the conditional `-1` delay sentinel |
-| EventBus classified an internal `DeadLetter` because deserialization failed | `Error` | The available delivery fields and internal outcome; no `Payload` field; Remoting still settles with `Retry` plus the conditional `-1` delay sentinel |
+| EventBus requested `Retry` for an unknown route or invalid registration state | `Error` | The available delivery fields, retry outcome, and actual-body `Payload` |
+| EventBus skipped a deserialization failure (`SkipDeserializationFailures = true`) | `Error` | The available delivery fields, `Success` outcome, and explicit skip action; no `Payload` field |
+| EventBus requested `Retry` for a deserialization failure (`SkipDeserializationFailures = false`) | `Error` | The available delivery fields, `Retry` outcome, and explicit retry action; no `Payload` field |
 
 Consume timeouts and delivery-scope lifecycle failures are owned and logged by the main client. They can cause a
 transport retry after the EventBus dispatch call has returned or been abandoned, so they are not reported as a new
@@ -725,14 +749,16 @@ EventBus classifies each completed dispatch attempt with one of these internal o
 | Route resolves, deserialization succeeds, and every handler succeeds | `Success` |
 | A handler or its dependency throws | `Retry` |
 | `ConsumeTimeout` elapses | `Retry`, enforced by the underlying Push consumer |
-| Deserialization fails or the serializer returns an invalid event | `DeadLetter` |
-| No registered event matches the received topic and tag | `DeadLetter` |
+| Deserialization fails or the serializer returns an invalid event, with `SkipDeserializationFailures = true` (default) | `Success` with `DeserializationFailed = true`; no handler runs and the failure is logged at `Error` |
+| Deserialization fails or the serializer returns an invalid event, with `SkipDeserializationFailures = false` | `Retry` with `DeserializationFailed = true`; no handler runs and the failure is logged at `Error` |
+| No registered event matches the received topic and tag | `Retry`; the failure is logged at `Error` and normal transport retry applies |
+| A route resolves but no dispatchable handler is available because registration state is inconsistent | `Retry`; the configuration defect is logged at `Error` |
 | Host shutdown cancels the delivery | Propagate cancellation; do not force a new result |
 
-The protocol adapter maps this classification to its main client's result. gRPC maps both `Retry` and `DeadLetter` to
-`Failure`; `Suspend` is not emitted by EventBus. Remoting maps internal `Success` to `Success` and both failure states
-to `Retry`. For internal `DeadLetter`, the adapter also sets `DelayLevelWhenNextConsume = -1`; only a concurrent PULL
-receiver treats that sentinel as direct DLQ, while POP normalizes it to `0` and follows normal retry progression. The
+The protocol adapter maps this classification to its main client's result. gRPC maps `Success` to `Success` and `Retry`
+to `Failure`; `Suspend` is not emitted by EventBus. Remoting maps `Success` to `Success` and `Retry` to `Retry`, leaving
+`RemotingPushConsumeContext.DelayLevelWhenNextConsume` at its default `0`. EventBus never sets a negative delay sentinel
+or requests direct DLQ placement; the underlying transport owns normal retry progression and its terminal policy. The
 [`ConsumeResult` handling design](consume-result-design.md) defines the complete mapping.
 
 Neither adapter provides exactly-once delivery. A retry can overlap a handler that ignored cancellation, and dispatch
@@ -763,8 +789,8 @@ isolation, and default/named DI behavior. Each integration suite starts a Produc
 concurrently publishes twelve tagged and twelve untagged events, verifies the matching Handler observes each event
 exactly once, and confirms all three Brokers stored messages. The Remoting suite also uses a separate Topic and group
 to verify Broker-assigned POP through successful `ack` settlement activities; its original workflow retains the
-default client-assigned PULL path. Unit tests own the remaining deterministic result-mapping, retry, dead-letter,
-named-registration, and lifecycle branches.
+default client-assigned PULL path. Unit tests own the remaining deterministic result-mapping, retry,
+deserialization-policy, named-registration, and lifecycle branches.
 
 Samples mirror the main repository's protocol-first layout. Each adapter has a Web API Publisher and a Generic Host
 Consumer sample, so the absence of the unused transport role is visible. Default and `orders` named registrations live
@@ -856,11 +882,11 @@ This repository uses the MIT License rather than the main client's Apache-2.0 li
    constructor; they are not included in the JSON payload. A topic with any untagged route uses a `*` consumer filter.
 3. Every concrete integration-event type has a public parameterless constructor. Registration uses it to discover the
    route without attributes, static abstract members, or application services.
-4. Handler failures produce the internal `Retry` outcome. Deserialization failures and unknown routes produce the
-   internal `DeadLetter` outcome. Remoting maps both failure outcomes to `Retry`; for `DeadLetter` it sets the
-   `DelayLevelWhenNextConsume = -1` sentinel, which requests direct DLQ only on concurrent PULL and is normalized by POP.
-   gRPC maps both failure outcomes to `Failure` and leaves the effective retry/DLQ policy to the underlying Push
-   client and service.
+4. The internal outcomes are only `Success` and `Retry`. Handler failures, unknown routes, and invalid registration
+   state produce `Retry`. A deserialization failure logs at `Error`, invokes no application handler, and produces
+   `Success` with `DeserializationFailed` under the default `SkipDeserializationFailures = true`; setting it to `false`
+   produces ordinary `Retry`. Remoting maps `Retry` to `Retry` with the default delay, gRPC maps it to `Failure`, and
+   neither adapter requests direct DLQ placement.
 5. The EventBus deserializes and dispatches one message per invocation while retaining configurable transport prefetch
    and consumer concurrency. Remoting handler batches are fixed at one.
 6. Public names use `EventHorizon.RocketMQ.EventBus`, `IntegrationEvent`, and

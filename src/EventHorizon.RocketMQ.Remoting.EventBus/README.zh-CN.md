@@ -101,6 +101,7 @@ builder.Services
         {
             options.GroupName = "ordering-service";
             options.MaxConcurrency = 8;
+            options.SkipDeserializationFailures = true; // default: log, skip, and acknowledge malformed payloads
         },
         configureProducer: static _ => { })
     .AddHandlersFromAssemblyOf<Program>();
@@ -116,6 +117,8 @@ await host.RunAsync();
 `configureProducer` 用于启用发布能力并注册 `IEventBus`；纯消费服务可以省略它。注册第一个处理器时才会添加 Push
 Consumer，因此纯发布服务可以只启用 Producer 而不注册处理器。Generic Host 负责启动和停止已经配置的 RocketMQ
 角色。
+两个委托接收 `RemotingEventBusConsumerOptions` 和 `RemotingEventBusProducerOptions` 这两个协议专属包装类型，而不是底层
+客户端选项。Producer 包装类型只配置普通发送参数；EventBus 不暴露原始订阅，也不暴露事务 Topic 和事务检查回调。
 
 同时支持命名的 RocketMQ 注册。启用 Producer 的命名 EventBus 会用同一个名称暴露 keyed `IEventBus`：
 
@@ -136,16 +139,25 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 每条消息只反序列化一次。全部匹配的处理器在同一个异步 DI Scope 中按顺序执行；只有所有处理器都成功完成，消息才
 算处理成功。
 
-| 情况 | 内部结果与 Remoting 处置 |
-| --- | --- |
-| 路由已知、Payload 有效且所有处理器都成功完成 | `Success` |
-| 处理器或应用依赖失败 | 内部 `Retry`；返回 `ConsumeResult.Retry`，使用默认延迟级别 `0` |
-| 路由未知或 Payload 无效 | 内部 `DeadLetter`；设置 `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`，并返回 `ConsumeResult.Retry` |
-| Host 停止并取消投递 | 继续传播取消，不额外生成结果 |
+可以通过 `configureConsumer` 接收的协议专属 `RemotingEventBusConsumerOptions`，为每个 EventBus 注册项单独配置格式错误
+Payload 的处置方式。
 
-Remoting 客户端 0.6.1 的 `ConsumeResult` 枚举只有 `Success` 和 `Retry`；`DeadLetter` 是 EventBus 内部分类和日志结果，
-不是传输层结果。负延迟级别哨兵值只有在底层接收器使用并发 PULL 时才请求直接进入 DLQ。POP 会把负值归一化为 `0`，
-按正常重试进度处理，因此 EventBus 不承诺所有 Remoting 接收模式都立即进入 DLQ。
+默认值为 `true`。Payload 格式错误时，EventBus 会以 `Error` 级别记录日志并明确记录跳过动作，不写入 `Payload` 字段，
+不调用任何业务处理器，并以 `Success` 确认投递。设置为 `false` 时同样不会调用处理器，但会明确记录重试动作并请求普通
+重试。
+
+| 情况 | EventBus 内部结果 | Remoting 处置 |
+| --- | --- | --- |
+| 路由已知、Payload 有效且所有处理器都成功完成 | `Success` | `ConsumeResult.Success` |
+| 处理器、应用依赖或路由查找失败 | `Retry` | `ConsumeResult.Retry`，使用默认延迟级别 `0` |
+| `SkipDeserializationFailures = true`（默认）时反序列化失败 | `Success`，并带有反序列化失败诊断标记 | `ConsumeResult.Success` |
+| `SkipDeserializationFailures = false` 时反序列化失败 | `Retry`，并带有反序列化失败诊断标记 | `ConsumeResult.Retry`，使用默认延迟级别 `0` |
+| Host 停止并取消投递 | 继续传播取消，不额外生成结果 | 继续传播取消 |
+
+Remoting 客户端 0.6.1 的 `ConsumeResult` 枚举只有 `Success` 和 `Retry`。EventBus 绝不设置负延迟级别哨兵值，也不请求
+直接进入 DLQ：内部 `Retry` 映射为 `ConsumeResult.Retry`，并保持 `RemotingPushConsumeContext.DelayLevelWhenNextConsume`
+的默认值 `0`。普通重试进度以及最终是否进入 DLQ 由底层 Remoting 客户端和服务端负责。gRPC 适配器会把同一个内部
+`Retry` 映射为 `Failure`。
 
 序列化失败、传输发送失败和非成功的 Remoting 发送状态统一抛出 `EventBusPublishException`；调用方主动取消时仍
 抛出未包装的 `OperationCanceledException`。

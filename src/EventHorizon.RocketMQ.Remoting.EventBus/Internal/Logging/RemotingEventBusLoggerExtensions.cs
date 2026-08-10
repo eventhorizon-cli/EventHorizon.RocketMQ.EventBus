@@ -122,7 +122,9 @@ internal static class RemotingEventBusLoggerExtensions
         RemotingMessageView message,
         TimeSpan duration)
     {
-        var level = result.Outcome == EventBusDispatchOutcome.Success ? LogLevel.Information : LogLevel.Error;
+        var level = result.DeserializationFailed || result.Outcome != EventBusDispatchOutcome.Success
+            ? LogLevel.Error
+            : LogLevel.Information;
         Write(logger, settings, level, () => WriteConsumeCompleted(
             logger,
             settings,
@@ -166,6 +168,7 @@ internal static class RemotingEventBusLoggerExtensions
                 message.QueueId,
                 message.QueueOffset,
                 message.DeliveryAttempt,
+                result.Outcome == EventBusDispatchOutcome.Success ? "Skip" : "Retry",
                 result.Outcome.ToString(),
                 duration);
             return;
@@ -178,9 +181,6 @@ internal static class RemotingEventBusLoggerExtensions
                 return;
             case EventBusDispatchOutcome.Retry:
                 WriteRetry();
-                return;
-            case EventBusDispatchOutcome.DeadLetter:
-                WriteDeadLetter();
                 return;
             default:
                 throw new ArgumentOutOfRangeException(
@@ -255,37 +255,6 @@ internal static class RemotingEventBusLoggerExtensions
                 duration);
         }
 
-        void WriteDeadLetter()
-        {
-            if (settings.IncludePayload)
-            {
-                RemotingEventBusLogMessages.ConsumeDeadLetterWithPayload(
-                    logger,
-                    message.Topic,
-                    message.Tag,
-                    message.MessageId,
-                    message.BrokerName,
-                    message.QueueId,
-                    message.QueueOffset,
-                    message.DeliveryAttempt,
-                    nameof(EventBusDispatchOutcome.DeadLetter),
-                    duration,
-                    EventBusPayloadJsonFormatter.Format(message.Body));
-                return;
-            }
-
-            RemotingEventBusLogMessages.ConsumeDeadLetter(
-                logger,
-                message.Topic,
-                message.Tag,
-                message.MessageId,
-                message.BrokerName,
-                message.QueueId,
-                message.QueueOffset,
-                message.DeliveryAttempt,
-                nameof(EventBusDispatchOutcome.DeadLetter),
-                duration);
-        }
     }
 
     private static string FormatPayload(

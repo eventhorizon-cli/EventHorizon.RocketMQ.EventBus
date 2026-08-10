@@ -87,6 +87,7 @@ builder.Services
         {
             options.GroupName = "ordering-service";
             options.MaxConcurrency = 8;
+            options.SkipDeserializationFailures = true; // default: log, skip, and acknowledge malformed payloads
         },
         configureProducer: static _ => { })
     .AddHandlersFromAssemblyOf<Program>();
@@ -102,6 +103,9 @@ to `Scoped`; `Transient` and `Singleton` are also available, and singleton handl
 `configureProducer` enables publishing and registers `IEventBus`. Omit it for a consumer-only service. A Push consumer
 is added when the first handler is registered, so a publisher-only service can enable the Producer without registering
 handlers. Generic Host starts and stops the configured RocketMQ roles.
+The delegates receive `GrpcEventBusConsumerOptions` and `GrpcEventBusProducerOptions`, protocol-owned wrappers rather
+than raw client options. The producer wrapper covers ordinary send settings only; EventBus does not expose raw
+subscriptions or transaction topics and checkers.
 
 Named RocketMQ registrations are also supported. A named, Producer-enabled EventBus exposes keyed `IEventBus` under
 the same name:
@@ -123,17 +127,26 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 Each message is deserialized once. All matching handlers run sequentially within one asynchronous DI scope, and the
 message succeeds only after every handler completes.
 
-| Condition | gRPC result |
-| --- | --- |
-| Route is known, payload is valid, and all handlers finish | `Success` |
-| A handler or application dependency fails | `Failure` |
-| Route is unknown or payload is invalid | `Failure` |
-| Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result |
+Configure malformed-payload handling through the registration's protocol-specific `GrpcEventBusConsumerOptions` passed
+to `configureConsumer`.
+
+`true` is the default. A malformed payload is logged at `Error` with an explicit skip action and without a `Payload` field,
+no application handler is invoked, and the delivery is acknowledged as `Success`. With `false`, no handler is invoked;
+the log records an explicit retry action and EventBus requests ordinary retry instead.
+
+| Condition | Internal EventBus outcome | gRPC result |
+| --- | --- | --- |
+| Route is known, payload is valid, and all handlers finish | `Success` | `Success` |
+| A handler, application dependency, or route lookup fails | `Retry` | `Failure` |
+| Deserialization fails with `SkipDeserializationFailures = true` (default) | `Success` with a deserialization-failure diagnostic | `Success` |
+| Deserialization fails with `SkipDeserializationFailures = false` | `Retry` with a deserialization-failure diagnostic | `Failure` |
+| Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result | Cancellation is propagated |
 
 The gRPC client 0.4.1 `ConsumeResult` is a sealed record. EventBus uses regular Push and emits only `Success` or
-`Failure`; it never emits the LitePush-only `Suspend` result. EventBus logs an unknown route or invalid payload as
-`DeadLetter`, but returns `Failure` without requesting direct DLQ placement. The underlying Push client and service own
-the effective retry and eventual DLQ policy.
+`Failure`; it never emits the LitePush-only `Suspend` result. EventBus never requests direct DLQ placement: internal
+`Retry` maps to gRPC `Failure`, while normal retry and any eventual DLQ decision remain with the underlying Push client
+and service. The Remoting adapter maps the same internal `Retry` to `ConsumeResult.Retry` and keeps its default delay
+level `0`.
 
 Serialization and send failures use `EventBusPublishException`. Caller-requested cancellation remains an unwrapped
 `OperationCanceledException`.

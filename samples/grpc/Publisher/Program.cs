@@ -21,14 +21,12 @@ builder.Services.AddSwaggerGen(static options => options.SwaggerDoc("v1", new Op
 
 builder.Services
     .AddRocketMQGrpc(options => options.Endpoint = endpoint)
-    .AddGrpcEventBus(configureProducer: options =>
-    {
-        options.Topics.Add("eventbus-orders");
-        options.Topics.Add("eventbus-inventory-snapshots");
-    });
+    // EventBus publishing is non-transactional; no transaction topics are declared.
+    .AddGrpcEventBus(configureProducer: static _ => { });
 builder.Services
     .AddRocketMQGrpc(ordersRegistrationName, options => options.Endpoint = endpoint)
-    .AddGrpcEventBus(configureProducer: options => options.Topics.Add("eventbus-orders"));
+    // The named registration uses the same non-transactional EventBus producer contract.
+    .AddGrpcEventBus(configureProducer: static _ => { });
 
 var app = builder.Build();
 app.UseSwagger();

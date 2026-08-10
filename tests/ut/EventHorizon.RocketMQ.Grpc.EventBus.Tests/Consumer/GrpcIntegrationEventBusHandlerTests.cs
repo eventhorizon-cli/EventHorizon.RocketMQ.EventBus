@@ -134,7 +134,7 @@ public sealed class GrpcIntegrationEventBusHandlerTests
     }
 
     [Fact]
-    public async Task DispatchAsync_UnknownRoute_ReturnsFailureAndLogsDeadLetterPayloadAsBase64Json()
+    public async Task DispatchAsync_UnknownRoute_ReturnsFailureAndLogsRetryPayloadAsBase64Json()
     {
         var logs = new RecordingLoggerProvider();
         var services = new ServiceCollection();
@@ -169,12 +169,16 @@ public sealed class GrpcIntegrationEventBusHandlerTests
         Assert.Contains(
             logs.Entries,
             entry => entry.LogLevel == LogLevel.Error &&
+                entry.Message.Contains("Outcome: Retry", StringComparison.Ordinal) &&
                 entry.Message.Contains("Payload", StringComparison.Ordinal) &&
                 entry.Message.Contains("{\"encoding\":\"base64\",\"data\":\"" + expectedBase64 + "\"}", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            logs.Entries,
+            static entry => entry.Message.Contains("Outcome: DeadLetter", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task DispatchAsync_DeserializationFails_ReturnsFailureWithoutLoggingPayload()
+    public async Task DispatchAsync_DeserializationFailsWithDefaultSkip_ReturnsSuccessAndLogsSkipWithoutPayload()
     {
         using var logs = new RecordingLoggerProvider();
         var services = new ServiceCollection();
@@ -198,11 +202,60 @@ public sealed class GrpcIntegrationEventBusHandlerTests
             1,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.Failure, result);
-        Assert.Contains(logs.Entries, static entry => entry.LogLevel == LogLevel.Error);
+        Assert.Equal(ConsumeResult.Success, result);
+        var entry = Assert.Single(logs.Entries, static entry =>
+            entry.LogLevel == LogLevel.Error &&
+            entry.Message.Contains("deserialization", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Action: Skip", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("Outcome: Success", entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(
             logs.Entries,
-            static entry => entry.LogLevel == LogLevel.Error && entry.Message.Contains("Payload", StringComparison.Ordinal));
+            static entry => entry.Message.Contains("Payload", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DispatchAsync_DeserializationFailsWithRetryConfigured_ReturnsFailureAndLogsRetryWithoutPayload()
+    {
+        using var logs = new RecordingLoggerProvider();
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.AddProvider(logs));
+        services.AddSingleton<GrpcDispatchRecorder>();
+        GrpcEventBusConsumerOptions? retainedOptions = null;
+        var eventBusBuilder = services
+            .AddRocketMQGrpc(ConfigureClient)
+            .AddGrpcEventBus(options =>
+            {
+                retainedOptions = options;
+                options.GroupName = "dispatch-consumer";
+                options.SkipDeserializationFailures = false;
+            });
+        eventBusBuilder.AddHandler<GrpcDispatchHandler>();
+        var wrapper = retainedOptions ?? throw new InvalidOperationException(
+            "The consumer options delegate was not invoked.");
+        wrapper.SkipDeserializationFailures = true;
+
+        using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var handler = ActivatorUtilities.CreateInstance<GrpcIntegrationEventBusHandler<GrpcDispatchHandler>>(
+            scope.ServiceProvider);
+
+        var result = await handler.DispatchAsync(
+            "dispatch",
+            "received",
+            new byte[] { 0xff },
+            "message-id",
+            1,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ConsumeResult.Failure, result);
+        var entry = Assert.Single(logs.Entries, static entry =>
+            entry.LogLevel == LogLevel.Error &&
+            entry.Message.Contains("deserialization", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Action: Retry", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("Outcome: Retry", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            logs.Entries,
+            static entry => entry.Message.Contains("Payload", StringComparison.Ordinal));
     }
 
     [Fact]

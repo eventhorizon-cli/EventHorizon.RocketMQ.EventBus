@@ -27,6 +27,10 @@ named 订单事件使用 `eventbus-orders` 的字面量 `order-submitted-named` 
 `OrderSubmittedIntegrationEvent` 和 `Tag == null` 的 `InventorySnapshotIntegrationEvent` 端点；对应 Consumer 直接
 注册两种事件形状的 Handler。无 Tag 路由会为其 Topic 生成 `*` 订阅，但本地分发仍精确匹配 `(Topic, null)`。
 
+Consumer 使用默认的 `SkipDeserializationFailures = true`：格式错误的 Payload 会以 `Error` 记录，在不调用 Handler 的
+情况下跳过并以 `Success` 确认。设置为 `false` 时会请求普通重试。EventBus 不会请求直接进入 DLQ；最终重试与 DLQ 处置
+由底层 RocketMQ 客户端和服务端负责。
+
 ## 本地 RocketMQ
 
 可运行默认值指向独立的

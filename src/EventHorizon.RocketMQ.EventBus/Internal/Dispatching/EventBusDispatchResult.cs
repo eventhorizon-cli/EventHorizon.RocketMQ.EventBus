@@ -17,9 +17,18 @@ internal readonly record struct EventBusDispatchResult(
     internal static EventBusDispatchResult Retry(IntegrationEvent integrationEvent, int handlerCount, Exception exception) =>
         new(EventBusDispatchOutcome.Retry, integrationEvent.GetType(), integrationEvent, false, handlerCount, exception);
 
-    internal static EventBusDispatchResult DeadLetter(
-        Type? integrationEventType,
+    internal static EventBusDispatchResult Retry(Type? integrationEventType, int handlerCount) =>
+        new(EventBusDispatchOutcome.Retry, integrationEventType, null, false, handlerCount, null);
+
+    internal static EventBusDispatchResult DeserializationFailure(
+        Type integrationEventType,
         int handlerCount,
-        bool deserializationFailed = false) =>
-        new(EventBusDispatchOutcome.DeadLetter, integrationEventType, null, deserializationFailed, handlerCount, null);
+        bool skipDeserializationFailures) =>
+        new(
+            skipDeserializationFailures ? EventBusDispatchOutcome.Success : EventBusDispatchOutcome.Retry,
+            integrationEventType,
+            null,
+            true,
+            handlerCount,
+            null);
 }

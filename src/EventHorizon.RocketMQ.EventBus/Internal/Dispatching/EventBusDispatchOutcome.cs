@@ -6,17 +6,13 @@ namespace EventHorizon.RocketMQ.EventBus.Internal.Dispatching;
 internal enum EventBusDispatchOutcome
 {
     /// <summary>
-    /// Every application handler completed successfully.
+    /// The delivery should be acknowledged because every application handler completed or a configured
+    /// deserialization failure was skipped.
     /// </summary>
     Success,
 
     /// <summary>
-    /// A handler or one of its dependencies failed and the transport should retry delivery.
+    /// The delivery failed and the transport should use its normal retry path.
     /// </summary>
     Retry,
-
-    /// <summary>
-    /// The route or payload is invalid and the transport should dead-letter delivery.
-    /// </summary>
-    DeadLetter,
 }

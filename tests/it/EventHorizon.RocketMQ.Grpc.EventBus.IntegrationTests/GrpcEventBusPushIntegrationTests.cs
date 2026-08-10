@@ -40,7 +40,7 @@ public sealed class GrpcEventBusPushIntegrationTests(RocketMQGrpcClusterFixture 
                     options.BatchSize = 4;
                     options.LongPollingTimeout = TimeSpan.FromSeconds(3);
                 },
-                configureProducer: options => options.Topics.Add(RocketMQGrpcClusterFixture.Topic))
+                configureProducer: static _ => { })
             .AddHandler<GrpcTaggedPushHandler>()
             .AddHandler<GrpcUntaggedPushHandler>();
 

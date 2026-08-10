@@ -3,15 +3,16 @@ using System.Runtime.CompilerServices;
 namespace EventHorizon.RocketMQ.Remoting.EventBus.Internal.Consumer;
 
 internal sealed class RemotingEventBusConsumerConfiguration(
-    Action<RemotingPushConsumerOptions>? configureConsumer)
+    RemotingEventBusConsumerOptions consumerOptions)
 {
-    private readonly Action<RemotingPushConsumerOptions>? _configureConsumer = configureConsumer;
+    private readonly RemotingEventBusConsumerOptions _consumerOptions =
+        consumerOptions ?? throw new ArgumentNullException(nameof(consumerOptions));
     private readonly ConditionalWeakTable<RemotingPushConsumerOptions, object> _options = new();
 
     internal void Configure(RemotingPushConsumerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _configureConsumer?.Invoke(options);
+        _consumerOptions.ApplyTo(options);
         _options.GetValue(options, static _ => new object());
     }
 

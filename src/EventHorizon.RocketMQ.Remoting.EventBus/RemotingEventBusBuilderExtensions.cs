@@ -18,7 +18,7 @@ public static class RemotingEventBusBuilderExtensions
     /// </summary>
     /// <param name="builder">The Remoting client registration to extend.</param>
     /// <param name="configureConsumer">
-    /// An optional Push consumer configuration delegate. It takes effect only after the first EventBus Handler is
+    /// An optional EventBus Push consumer configuration delegate. It takes effect after the first EventBus Handler is
     /// registered.
     /// </param>
     /// <param name="configureProducer">
@@ -32,19 +32,27 @@ public static class RemotingEventBusBuilderExtensions
     /// </exception>
     public static IEventBusBuilder AddRemotingEventBus(
         this RemotingRocketMQBuilder builder,
-        Action<RemotingPushConsumerOptions>? configureConsumer = null,
-        Action<RemotingProducerOptions>? configureProducer = null)
+        Action<RemotingEventBusConsumerOptions>? configureConsumer = null,
+        Action<RemotingEventBusProducerOptions>? configureProducer = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        var consumerOptions = new RemotingEventBusConsumerOptions();
+        configureConsumer?.Invoke(consumerOptions);
+        consumerOptions = consumerOptions.Snapshot();
 
         var registration = EventBusRegistration.Create(
             builder.Services,
             builder.RegistrationName,
-            eventBusRegistration => AddConsumerWithAnchor(builder, eventBusRegistration, configureConsumer));
+            eventBusRegistration => AddConsumerWithAnchor(builder, eventBusRegistration, consumerOptions),
+            skipDeserializationFailures: consumerOptions.SkipDeserializationFailures);
 
         if (configureProducer is not null)
         {
-            builder.AddRemotingProducer(configureProducer);
+            var producerOptions = new RemotingEventBusProducerOptions();
+            configureProducer(producerOptions);
+            producerOptions = producerOptions.Snapshot();
+            builder.AddRemotingProducer(producerOptions.ApplyTo);
             AddPublisher(builder, registration);
         }
 
@@ -54,14 +62,14 @@ public static class RemotingEventBusBuilderExtensions
     private static void AddConsumerWithAnchor(
         RemotingRocketMQBuilder builder,
         EventBusRegistration registration,
-        Action<RemotingPushConsumerOptions>? configureConsumer)
+        RemotingEventBusConsumerOptions consumerOptions)
     {
         try
         {
             // This closes the bridge at startup; delivery dispatch never reflects over application Handlers.
             AddConsumerMethod.MakeGenericMethod(registration.ConsumerAnchorHandlerType).Invoke(
                 null,
-                [builder, registration, configureConsumer]);
+                [builder, registration, consumerOptions]);
         }
         catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {
@@ -73,10 +81,10 @@ public static class RemotingEventBusBuilderExtensions
     private static void AddConsumer<TAnchorHandler>(
         RemotingRocketMQBuilder builder,
         EventBusRegistration registration,
-        Action<RemotingPushConsumerOptions>? configureConsumer)
+        RemotingEventBusConsumerOptions consumerOptions)
         where TAnchorHandler : class
     {
-        var consumerConfiguration = new RemotingEventBusConsumerConfiguration(configureConsumer);
+        var consumerConfiguration = new RemotingEventBusConsumerConfiguration(consumerOptions);
 
         builder.AddRemotingPushConsumer<RemotingEventBusPushMessageHandler<TAnchorHandler>>(
             ServiceLifetime.Scoped,

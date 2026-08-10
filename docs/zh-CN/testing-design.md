@@ -54,12 +54,17 @@ Core Tests 覆盖：
 - 每个消费 registration 使用其第一个自有 Handler 闭合出唯一的协议桥接类型，不暴露传输层注册身份；
 - 直接注册或程序集扫描尝试把同一 Handler 类型加入另一个默认或 named EventBus registration 时，在启动期失败；
 - 使用私有 token 隔离不同 registration 的 Route、Serializer 和不同 Handler 类型；
+- 验证 `GrpcEventBusConsumerOptions`、`RemotingEventBusConsumerOptions`、`GrpcEventBusProducerOptions` 和
+  `RemotingEventBusProducerOptions` 的完整筛选后属性面，以及它们映射到原始主 Client options 的不可变快照，而公开 API
+  不暴露这些主 Client options 类型；
+- 验证订阅始终由路由生成并拒绝手动 `Subscribe`，以及 Remoting clustering/并发/单消息分发边界和对 orderly、broadcast、
+  local offset 设置的拒绝；
+- 验证 Producer 配置封装排除事务回调和不支持事务发布；
 - 固定使用 Scoped 协议桥接层，并保证每次投递只有一个由主客户端创建的异步 Scope；
 - 验证适配器结果契约的准确形状：gRPC sealed record 的 `Success`/`Failure` 映射（EventBus 不会发出仅供 LitePush
-  使用的 `Suspend`）、Remoting `Success`/`Retry` 枚举映射，以及内部 `DeadLetter` 映射为 Remoting `Retry` 并设置
-  `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`；
-- 验证 Remoting 上下文边界：普通内部 `Retry` 保持默认延迟 `0`，并发 PULL 可以把 `DeadLetter` 负哨兵值解释为直接
-  进入 DLQ，POP 会将其归一化为 `0`；
+  使用的 `Suspend`），以及 Remoting `Success`/`Retry` 枚举映射；
+- 验证内部仅有 `Success`/`Retry` 两种结果，包括各协议配置类型默认确认反序列化失败、显式配置后的普通重试，以及
+  Remoting 始终保持 `DelayLevelWhenNextConsume` 默认值 `0` 的约束；
 - Remoting 非成功发送状态会转换成发布失败；
 - CancellationToken 传播和订阅汇总启动行为。
 
@@ -119,9 +124,9 @@ Remoting Suite 还会在独立 Topic 与 Consumer Group 上运行 Broker 分配�
 如果实现退化为 PULL，测试会超时失败。原有流程继续覆盖默认的 Client assignment + PULL。
 
 Fixture 使用唯一 Topic 与 Group，通过有上限的可观察条件等待，并自行管理全部 Docker 资源。不需要真实 Broker 的
-结果映射、无效 Payload、未知路由、Retry 分类、Remoting 上下文副作用与默认延迟、named registration 等分支由确定性
-Unit Test 覆盖。Mapper 与 Handler 测试分别断言返回的传输结果和上下文变更，避免未来传输枚举变化后把内部
-`DeadLetter` 误解为所有接收模式都能直接进入 DLQ。
+结果映射、两种无效 Payload 策略、未知路由、Retry 分类、Remoting 默认延迟、named registration 快照等分支由确定性
+Unit Test 覆盖。Mapper 与 Handler 测试分别断言返回的传输结果和上下文，避免未来传输枚举变化后在 EventBus 边界
+意外重新引入直接进入 DLQ 的请求。
 
 ## 独立 Compose 环境
 

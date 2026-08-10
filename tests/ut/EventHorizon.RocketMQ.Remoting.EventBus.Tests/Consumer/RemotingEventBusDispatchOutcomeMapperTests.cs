@@ -7,12 +7,17 @@ public sealed class RemotingEventBusDispatchOutcomeMapperTests
     [Theory]
     [InlineData("Success", ConsumeResult.Success)]
     [InlineData("Retry", ConsumeResult.Retry)]
-    [InlineData("DeadLetter", ConsumeResult.Retry)]
     public void Map_EventBusOutcome_ReturnsSupportedRemotingResult(string outcomeName, ConsumeResult expected)
     {
         var result = Map(CreateOutcome(outcomeName));
 
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void EventBusDispatchOutcome_EnumNames_ContainOnlySuccessAndRetry()
+    {
+        Assert.Equal(["Success", "Retry"], Enum.GetNames(GetOutcomeType()));
     }
 
     [Fact]
