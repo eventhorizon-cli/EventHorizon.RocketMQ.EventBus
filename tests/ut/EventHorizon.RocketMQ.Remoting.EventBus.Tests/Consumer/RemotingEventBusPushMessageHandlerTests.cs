@@ -97,7 +97,7 @@ public sealed class RemotingEventBusPushMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_UnknownRoute_RequestsPullDeadLetterAndLogsTheJsonPayload()
+    public async Task HandleAsync_UnknownRoute_RequestsRetryAndLogsTheJsonPayload()
     {
         var services = CreateServices();
         using var loggerProvider = new CollectingLoggerProvider();
@@ -117,7 +117,7 @@ public sealed class RemotingEventBusPushMessageHandlerTests
         var result = await handler.HandleAsync([message], context, TestContext.Current.CancellationToken);
 
         Assert.Equal(ConsumeResult.Retry, result);
-        Assert.Equal(-1, context.DelayLevelWhenNextConsume);
+        Assert.Equal(0, context.DelayLevelWhenNextConsume);
         var entries = loggerProvider.Entries
             .Where(static entry => entry.CategoryName.StartsWith("EventHorizon.RocketMQ.Remoting.EventBus", StringComparison.Ordinal))
             .ToArray();
@@ -125,13 +125,13 @@ public sealed class RemotingEventBusPushMessageHandlerTests
         Assert.Contains(
             entries,
             static entry => entry.Level == LogLevel.Error &&
-                entry.Message.Contains("Outcome: DeadLetter", StringComparison.Ordinal) &&
+                entry.Message.Contains("Outcome: Retry", StringComparison.Ordinal) &&
                 entry.Message.Contains("Payload", StringComparison.Ordinal) &&
                 entry.Message.Contains("{\"Value\":\"do-not-log-this\"}", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task HandleAsync_DeserializationFails_RequestsPullDeadLetterWithoutLoggingPayload()
+    public async Task HandleAsync_DeserializationFails_ByDefault_SkipsAndLogsWithoutPayload()
     {
         var services = CreateServices();
         using var loggerProvider = new CollectingLoggerProvider();
@@ -152,11 +152,49 @@ public sealed class RemotingEventBusPushMessageHandlerTests
             context,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(ConsumeResult.Retry, result);
-        Assert.Equal(-1, context.DelayLevelWhenNextConsume);
+        Assert.Equal(ConsumeResult.Success, result);
+        Assert.Equal(0, context.DelayLevelWhenNextConsume);
         Assert.Contains(loggerProvider.Entries, static entry =>
             entry.Level == LogLevel.Error &&
-            entry.Message.Contains("Outcome: DeadLetter", StringComparison.Ordinal));
+            entry.Message.Contains("Action: Skip", StringComparison.Ordinal) &&
+            entry.Message.Contains("Outcome: Success", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            loggerProvider.Entries,
+            static entry => entry.Level == LogLevel.Error && entry.Message.Contains("Payload", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HandleAsync_DeserializationFails_WhenSkipIsDisabled_RequestsRetryWithoutLoggingPayload()
+    {
+        var services = CreateServices();
+        using var loggerProvider = new CollectingLoggerProvider();
+        services.AddLogging(logging => logging.AddProvider(loggerProvider));
+        services
+            .AddRocketMQRemoting(options => options.NamesrvAddr = "127.0.0.1:9876")
+            .AddRemotingEventBus(options =>
+            {
+                options.GroupName = "orders-consumer";
+                options.SkipDeserializationFailures = false;
+            })
+            .AddHandler<RemotingTestHandler>();
+
+        using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var handler = CreateHandler(scope.ServiceProvider);
+        var message = RemotingTestMessageFactory.Create("orders", "submitted", new byte[] { 0xff });
+        var context = new RemotingPushConsumeContext();
+
+        var result = await handler.HandleAsync(
+            [message],
+            context,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ConsumeResult.Retry, result);
+        Assert.Equal(0, context.DelayLevelWhenNextConsume);
+        Assert.Contains(loggerProvider.Entries, static entry =>
+            entry.Level == LogLevel.Error &&
+            entry.Message.Contains("Action: Retry", StringComparison.Ordinal) &&
+            entry.Message.Contains("Outcome: Retry", StringComparison.Ordinal));
         Assert.DoesNotContain(
             loggerProvider.Entries,
             static entry => entry.Level == LogLevel.Error && entry.Message.Contains("Payload", StringComparison.Ordinal));

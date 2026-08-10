@@ -199,51 +199,10 @@ internal static partial class RemotingEventBusLogMessages
         TimeSpan duration);
 
     [LoggerMessage(
-        EventId = 2140,
-        EventName = "EventBusConsumeDeadLetterWithPayload",
-        Level = LogLevel.Error,
-        Message = "EventBus consume completed. Outcome: {Outcome}. Payload: {Payload}. Topic: {Topic}. Tag: {Tag}. " +
-            "MessageId: {MessageId}. BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
-            "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
-        SkipEnabledCheck = true)]
-    internal static partial void ConsumeDeadLetterWithPayload(
-        ILogger logger,
-        string topic,
-        string? tag,
-        string messageId,
-        string? brokerName,
-        int queueId,
-        long queueOffset,
-        int deliveryAttempt,
-        string outcome,
-        TimeSpan duration,
-        string payload);
-
-    [LoggerMessage(
-        EventId = 2141,
-        EventName = "EventBusConsumeDeadLetter",
-        Level = LogLevel.Error,
-        Message = "EventBus consume completed. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. MessageId: {MessageId}. " +
-            "BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
-            "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
-        SkipEnabledCheck = true)]
-    internal static partial void ConsumeDeadLetter(
-        ILogger logger,
-        string topic,
-        string? tag,
-        string messageId,
-        string? brokerName,
-        int queueId,
-        long queueOffset,
-        int deliveryAttempt,
-        string outcome,
-        TimeSpan duration);
-
-    [LoggerMessage(
         EventId = 2142,
         EventName = "EventBusPayloadDeserializationFailed",
         Level = LogLevel.Error,
-        Message = "EventBus payload deserialization failed. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. " +
+        Message = "EventBus payload deserialization failed. Action: {Action}. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. " +
             "MessageId: {MessageId}. BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
             "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
         SkipEnabledCheck = true)]
@@ -256,6 +215,7 @@ internal static partial class RemotingEventBusLogMessages
         int queueId,
         long queueOffset,
         int deliveryAttempt,
+        string action,
         string outcome,
         TimeSpan duration);
 

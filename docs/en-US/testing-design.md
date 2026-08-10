@@ -58,12 +58,18 @@ Adapter and compatibility tests cover:
 - startup rejection when direct registration or assembly scanning attempts to assign one Handler type to another
   default or named EventBus registration;
 - private-token isolation of routes, serializers, and distinct Handler types across registrations;
+- the exact curated surfaces of `GrpcEventBusConsumerOptions`, `RemotingEventBusConsumerOptions`,
+  `GrpcEventBusProducerOptions`, and `RemotingEventBusProducerOptions`, including immutable snapshot mapping to raw
+  main-client options without exposing those option types;
+- route-derived subscriptions and rejection of manual `Subscribe` calls, plus the Remoting clustering/concurrent
+  one-message boundary and rejection of orderly, broadcasting, and local-offset settings;
+- producer-wrapper exclusion of transaction callbacks and unsupported transaction publishing;
 - a fixed Scoped protocol bridge and exactly one main-client-owned async scope per delivery;
 - the exact adapter result contracts: gRPC's sealed-record `Success`/`Failure` mapping (EventBus never emits its
-  LitePush-only `Suspend`), Remoting's `Success`/`Retry` enum mapping, and the internal `DeadLetter` mapping to
-  Remoting `Retry` plus `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`;
-- the Remoting context boundary: ordinary internal `Retry` leaves the delay at the default `0`, concurrent PULL may
-  interpret the negative `DeadLetter` sentinel as direct DLQ, and POP normalizes it to `0`;
+  LitePush-only `Suspend`) and Remoting's `Success`/`Retry` enum mapping;
+- the two-state internal `Success`/`Retry` contract, including each protocol wrapper's default acknowledgement of
+  deserialization failures, explicit normal retry, and the invariant that Remoting keeps
+  `DelayLevelWhenNextConsume` at the default `0`;
 - Remoting non-success send statuses becoming publish failures; and
 - cancellation-token propagation and subscription-summary startup behavior.
 
@@ -127,10 +133,10 @@ responses. A PULL regression would emit offset `commit`, not `ack`, and the test
 the default and is covered by the original PULL workflow.
 
 The fixtures create unique Topics and Groups, wait on observable conditions with bounded timeouts, and own all Docker
-resources. Deterministic unit tests cover result mapping, malformed payloads, unknown routes, retry classification,
-the Remoting context side effect and default delay, named registrations, and other branches that do not require a
-Broker. Mapper and Handler tests respectively assert the returned transport value and context mutation, so a future
-transport enum change cannot make an internal `DeadLetter` look like a universal direct-DLQ operation.
+resources. Deterministic unit tests cover result mapping, both malformed-payload policies, unknown routes, retry
+classification, the unchanged Remoting default delay, named registration snapshots, and other branches that do not
+require a Broker. Mapper and Handler tests respectively assert the returned transport value and context, so a future
+transport enum change cannot accidentally reintroduce a direct-DLQ request at the EventBus boundary.
 
 ## Independent Compose environment
 

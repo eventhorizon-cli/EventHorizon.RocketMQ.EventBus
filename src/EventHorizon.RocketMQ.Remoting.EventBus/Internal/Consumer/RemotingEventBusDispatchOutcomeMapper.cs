@@ -6,7 +6,6 @@ internal static class RemotingEventBusDispatchOutcomeMapper
     {
         EventBusDispatchOutcome.Success => ConsumeResult.Success,
         EventBusDispatchOutcome.Retry => ConsumeResult.Retry,
-        EventBusDispatchOutcome.DeadLetter => ConsumeResult.Retry,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown EventBus dispatch outcome."),
     };
 }

@@ -107,6 +107,7 @@ builder.Services
         {
             options.GroupName = "ordering-service";
             options.MaxConcurrency = 8;
+            options.SkipDeserializationFailures = true; // default: log, skip, and acknowledge malformed payloads
         },
         configureProducer: static _ => { })
     .AddHandlersFromAssemblyOf<Program>();
@@ -122,6 +123,9 @@ to `Scoped`; `Transient` and `Singleton` are also available, and singleton handl
 `configureProducer` enables publishing and registers `IEventBus`. Omit it for a consumer-only service. A Push consumer
 is added when the first handler is registered, so a publisher-only service can enable the Producer without registering
 handlers. Generic Host starts and stops the configured RocketMQ roles.
+The delegates receive `RemotingEventBusConsumerOptions` and `RemotingEventBusProducerOptions`, protocol-owned wrappers
+rather than raw client options. The producer wrapper covers ordinary send settings only; EventBus does not expose raw
+subscriptions or transaction topics and checkers.
 
 Named RocketMQ registrations are also supported. A named, Producer-enabled EventBus exposes keyed `IEventBus` under
 the same name:
@@ -143,17 +147,26 @@ var ordersEventBus = host.Services.GetRequiredKeyedService<IEventBus>("orders");
 Each message is deserialized once. All matching handlers run sequentially within one asynchronous DI scope, and the
 message succeeds only after every handler completes.
 
-| Condition | Internal outcome and Remoting settlement |
-| --- | --- |
-| Route is known, payload is valid, and all handlers finish | `Success` |
-| A handler or application dependency fails | Internal `Retry`; returns `ConsumeResult.Retry` with the default delay level `0` |
-| Route is unknown or payload is invalid | Internal `DeadLetter`; sets `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1` and returns `ConsumeResult.Retry` |
-| Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result |
+Configure malformed-payload handling through the registration's protocol-specific `RemotingEventBusConsumerOptions`
+passed to `configureConsumer`.
 
-The Remoting client 0.6.1 `ConsumeResult` enum has only `Success` and `Retry`; `DeadLetter` is an EventBus internal
-classification and log outcome, not a transport result. A negative delay-level sentinel requests direct DLQ only when
-the underlying receiver is concurrent PULL. POP normalizes the negative value to `0` and follows its normal retry
-progression, so EventBus does not promise immediate DLQ for every Remoting delivery mode.
+`true` is the default. A malformed payload is logged at `Error` with an explicit skip action and without a `Payload` field,
+no application handler is invoked, and the delivery is acknowledged as `Success`. With `false`, no handler is invoked;
+the log records an explicit retry action and EventBus requests ordinary retry instead.
+
+| Condition | Internal EventBus outcome | Remoting settlement |
+| --- | --- | --- |
+| Route is known, payload is valid, and all handlers finish | `Success` | `ConsumeResult.Success` |
+| A handler, application dependency, or route lookup fails | `Retry` | `ConsumeResult.Retry`, with the default delay level `0` |
+| Deserialization fails with `SkipDeserializationFailures = true` (default) | `Success` with a deserialization-failure diagnostic | `ConsumeResult.Success` |
+| Deserialization fails with `SkipDeserializationFailures = false` | `Retry` with a deserialization-failure diagnostic | `ConsumeResult.Retry`, with the default delay level `0` |
+| Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result | Cancellation is propagated |
+
+The Remoting client 0.6.1 `ConsumeResult` enum has only `Success` and `Retry`. EventBus never sets a negative delay-level
+sentinel or requests direct DLQ placement: internal `Retry` maps to `ConsumeResult.Retry` and leaves
+`RemotingPushConsumeContext.DelayLevelWhenNextConsume` at its default `0`. Normal retry progression and any eventual
+DLQ decision remain with the underlying Remoting client and service. The gRPC adapter maps the same internal `Retry` to
+`Failure`.
 
 Serialization failures, transport send failures, and non-success Remoting send statuses use
 `EventBusPublishException`. Caller-requested cancellation remains an unwrapped `OperationCanceledException`.

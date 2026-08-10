@@ -47,7 +47,8 @@ internal sealed class EventBusRegistration
     internal static EventBusRegistration Create(
         IServiceCollection services,
         string? registrationName,
-        Action<EventBusRegistration>? ensureConsumer = null)
+        Action<EventBusRegistration>? ensureConsumer = null,
+        bool skipDeserializationFailures = true)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -65,6 +66,7 @@ internal sealed class EventBusRegistration
         var token = new object();
         var registration = new EventBusRegistration(services, registrationName, token, ensureConsumer);
         services.AddSingleton(new EventBusRegistrationMarker(registrationName, token));
+        services.AddKeyedSingleton(token, new EventBusConsumptionSettings(skipDeserializationFailures));
         services.AddKeyedSingleton(token, registration._loggingSettings);
         services.AddKeyedSingleton<IIntegrationEventSerializer, NewtonsoftJsonIntegrationEventSerializer>(token);
         services.AddKeyedSingleton<IEventBusRoutePlan>(
@@ -76,6 +78,7 @@ internal sealed class EventBusRegistration
                 token,
                 serviceProvider.GetRequiredKeyedService<IEventBusRoutePlan>(token),
                 serviceProvider.GetRequiredKeyedService<IIntegrationEventSerializer>(token),
+                serviceProvider.GetRequiredKeyedService<EventBusConsumptionSettings>(token),
                 serviceProvider));
 
         return registration;

@@ -19,7 +19,7 @@ Use the following as the source of truth for detailed, evolving guidance instead
 - [EventBus design](docs/en-US/event-bus-design.md): package ownership, public contracts, routing, serialization,
   dependency injection, Generic Host lifecycle, logging, testing, and release structure.
 - [`ConsumeResult` handling design](docs/en-US/consume-result-design.md): common dispatch outcomes, adapter mappings,
-  exception classification, retry, dead-letter, cancellation, and transport settlement.
+  exception classification, deserialization-failure policy, retry, cancellation, and transport settlement.
 - [Serialization design](docs/en-US/serialization-design.md): default Newtonsoft.Json settings, UTF-8 wire format,
   schema evolution, compatibility tests, and custom serializer requirements.
 - [EventHorizon.RocketMQ](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ): the protocol-client APIs and
@@ -44,7 +44,7 @@ documented EventBus-specific reason to differ.
   other or share transport-specific public types.
 - Treat the main-client packages as external transport boundaries. Adapters may depend only on their documented public
   contracts and behavior-oriented extension points. Never expose, copy, infer, persist, or pass through internal Role
-  Keys, options names, Consumer indexes, DI descriptor layouts, or other registration implementation details.
+  Keys, raw main-client options, Consumer indexes, DI descriptor layouts, or other registration implementation details.
 - Keep registration-specific bridge identity inside the EventBus implementation. The first application Handler owned
   by a consuming registration is its internal anchor type; adapters close their protocol bridge Handler over that type
   and use a Core-owned generic registration accessor. Do not expose an extra marker type in the public API.
@@ -57,12 +57,14 @@ documented EventBus-specific reason to differ.
   only `Success` or `Failure`. Against the released
   [Remoting `remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)
   client, the latter enum contains
-  only `Success` and `Retry`. Map the internal common outcome with an explicit switch; never cast by numeric value.
-  Internal `DeadLetter` maps to Remoting `Retry` after setting
-  `RemotingPushConsumeContext.DelayLevelWhenNextConsume = -1`; concurrent PULL may interpret that sentinel as direct
-  DLQ, while POP normalizes it to the default retry level. Ordinary `Retry` leaves the delay at its default.
-- Keep transport message conversion, Producer integration, Push Consumer options, subscription materialization,
-  protocol result mapping, and transport-specific logging in the owning adapter.
+  only `Success` and `Retry`. The internal common outcome also contains only `Success` and `Retry`; map it with an
+  explicit switch and never cast by numeric value. EventBus never requests direct DLQ settlement or sets a negative
+  Remoting delay level. Ordinary `Retry` leaves `RemotingPushConsumeContext.DelayLevelWhenNextConsume` at its default.
+- Keep transport message conversion, Producer integration, adapter-owned Producer/Consumer option wrappers, subscription
+  materialization, protocol result mapping, and transport-specific logging in the owning adapter. Public
+  `AddGrpcEventBus` and `AddRemotingEventBus` delegates accept only the matching EventBus-owned wrappers; adapters map
+  immutable wrapper snapshots to raw main-client options internally. The public API never accepts or returns raw
+  `GrpcPushConsumerOptions`, `RemotingPushConsumerOptions`, `GrpcProducerOptions`, or `RemotingProducerOptions`.
 - Keep Core consumption registration and dispatch transport-mode-neutral. A future public delivery model such as gRPC
   LitePush gets a separate adapter entry point and bridge only after the main client exposes a documented hosted-delivery
   abstraction. Classic Remoting POP is not a separate EventBus model: the Remoting Push consumer may select PULL or POP
@@ -118,9 +120,13 @@ documented EventBus-specific reason to differ.
   PULL or POP receiver according to its effective queue assignment. Standalone Pull, Simple, LitePush, FIFO,
   transaction, delay, priority, batch-publish, request-reply, SQL92, and dynamic-subscription APIs remain outside the
   first release.
-- A message succeeds only after every matching application handler completes. Handler or dependency failures request
-  retry. Unknown routes and invalid payloads request dead-letter. Preserve shutdown cancellation for the underlying
-  consumer instead of manufacturing a new result.
+- Consumer option wrappers expose only curated settings. Subscriptions always come from the startup `(Topic, Tag)` route
+  table. Remoting wrappers support clustering, concurrent dispatch, and one-message EventBus dispatch; they do not
+  expose orderly, broadcasting, or local-offset settings. Producer wrappers exclude transaction callbacks.
+- A normally processed message succeeds only after every matching application handler completes. Handler or dependency
+  failures and unknown routes request ordinary retry. Deserialization failures invoke no Handler: by default they are
+  logged at `Error` and acknowledged as `Success`; `SkipDeserializationFailures = false` requests ordinary retry.
+  Preserve shutdown cancellation for the underlying consumer instead of manufacturing a new result.
 
 ## Dependency injection and lifecycle
 
@@ -154,9 +160,9 @@ documented EventBus-specific reason to differ.
 - Wrap serialization failures, transport send exceptions, and Remoting non-success send statuses in the Core
   `EventBusPublishException`. Preserve the original exception as `InnerException`, keep a non-exception transport
   status in `TransportResult`, and never wrap caller-requested `OperationCanceledException`.
-- Emit structured publish, consume, and outcome logs through `Microsoft.Extensions.Logging`. Successful operations use
-  `Information`; publish failures, `Retry`, and `DeadLetter` use `Error`. Normal Host-shutdown cancellation is not an
-  EventBus error.
+- Emit structured publish, consume, and outcome logs through `Microsoft.Extensions.Logging`. Successful Handler
+  operations use `Information`; publish failures, `Retry`, and skipped deserialization failures use `Error`. Normal
+  Host-shutdown cancellation is not an EventBus error.
 - After all subscriptions for one EventBus registration are validated and materialized, emit one aggregated
   `Information` summary, never one log per Handler. Include registration name (`<default>` for the default), Consumer
   Group, handler count, subscription count, and the deterministic Topic plus Tag `FilterExpression` list.
@@ -171,6 +177,11 @@ documented EventBus-specific reason to differ.
   `true`; `Enabled = false` suppresses all EventBus logs for that registration, including its subscription summary,
   while `IncludePayload = false` preserves other logs without formatting or adding the `Payload` field. Main-client
   logs remain outside these switches. Materialize settings as an immutable service-provider snapshot.
+- `GrpcEventBusConsumerOptions.SkipDeserializationFailures` and
+  `RemotingEventBusConsumerOptions.SkipDeserializationFailures` are registration-local and default to `true`; materialize
+  each wrapper as an immutable adapter snapshot. A skipped failure returns internal `Success` with a separate diagnostic
+  flag so adapters log the skip at `Error` without introducing a `Skipped` outcome. `EventBusLoggingOptions` and
+  `ConfigureLogging` remain separate from consumer and producer configuration.
 - Use adapter namespaces as logger-category prefixes so applications can filter full-payload logs. Documentation must
   warn that these logs can contain credentials, personal data, or other sensitive application content.
 
@@ -189,7 +200,7 @@ documented EventBus-specific reason to differ.
   installation and package-selection documentation presents only the gRPC and Remoting adapters. The Core package
   README must identify it as an internal shared support dependency, omit a direct-install command, and direct users to
   an adapter instead. The package graph and Core publication order belong in `docs` and release-maintainer guidance.
-- Update `consume-result-design.md` whenever result selection, cancellation, retry, dead-letter, or settlement behavior
+- Update `consume-result-design.md` whenever result selection, cancellation, retry, or settlement behavior
   changes. Update `serialization-design.md` whenever the wire contract changes. Update `event-bus-design.md` for all
   other architectural and public-contract decisions.
 - Do not change documentation for an internal refactor with no user-visible or architectural effect. State any
@@ -243,14 +254,14 @@ documented EventBus-specific reason to differ.
   mocks. Use stateful fakes only when mocks would obscure streaming, lifecycle, or concurrency behavior.
 - Add compatibility tests that verify both adapters map every internal dispatch outcome to the correct independent
   transport result contract. Test the gRPC sealed-record mapping (`Success` and `Failure`; EventBus never emits
-  `Suspend`) and the Remoting enum mapping (`Success`/`Retry`), including the Remoting `DeadLetter` context side effect
-  (`DelayLevelWhenNextConsume = -1`) and ordinary `Retry` default delay. Also test route validation, deterministic
+  `Suspend`) and the Remoting enum mapping (`Success`/`Retry`), including the invariant that ordinary `Retry` leaves the
+  Remoting context delay at its default. Also test both deserialization-failure policies, route validation, deterministic
   scanning, duplicate registration, handler ordering, serializer replacement, DI lifetime, cancellation, optional role
   creation, named isolation, subscription-summary logs, logging levels, and every `ConsumeResult` branch.
 - Integration suites cover Generic Host lifecycle, concurrent tagged and untagged publish/consume success, exact
   routing, Newtonsoft.Json compatibility, and message distribution across three independent Brokers for both real
-  transports. Keep retry, dead-letter, malformed-payload, unknown-route, and other deterministic outcome branches in
-  unit tests; integration coverage does not replace deterministic unit coverage.
+  transports. Keep retry, malformed-payload policy, unknown-route, and other deterministic outcome branches in unit
+  tests; integration coverage does not replace deterministic unit coverage.
 - After C# changes, run the narrowest relevant tests while iterating, then the affected complete test project. Run
   formatting before finishing.
 

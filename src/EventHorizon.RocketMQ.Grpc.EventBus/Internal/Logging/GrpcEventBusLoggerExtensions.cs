@@ -124,7 +124,9 @@ internal static class GrpcEventBusLoggerExtensions
         TimeSpan duration,
         ReadOnlyMemory<byte> body)
     {
-        var level = result.Outcome == EventBusDispatchOutcome.Success ? LogLevel.Information : LogLevel.Error;
+        var level = result.DeserializationFailed || result.Outcome != EventBusDispatchOutcome.Success
+            ? LogLevel.Error
+            : LogLevel.Information;
         Write(logger, settings, level, () => WriteConsumerOutcome(
             logger,
             settings,
@@ -172,6 +174,23 @@ internal static class GrpcEventBusLoggerExtensions
         TimeSpan duration,
         ReadOnlyMemory<byte> body)
     {
+        if (result.DeserializationFailed)
+        {
+            GrpcEventBusLogMessages.ConsumerDeserializationFailed(
+                logger,
+                topic,
+                tag,
+                messageId,
+                brokerName,
+                queueId,
+                queueOffset,
+                deliveryAttempt,
+                result.Outcome == EventBusDispatchOutcome.Success ? "Skip" : "Retry",
+                result.Outcome.ToString(),
+                duration);
+            return;
+        }
+
         switch (result.Outcome)
         {
             case EventBusDispatchOutcome.Success:
@@ -182,9 +201,11 @@ internal static class GrpcEventBusLoggerExtensions
                 WriteRetryConsumerOutcome();
                 return;
 
-            case EventBusDispatchOutcome.DeadLetter:
-                WriteDeadLetterConsumerOutcome();
-                return;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(result),
+                    result.Outcome,
+                    "Unknown EventBus dispatch outcome.");
         }
 
         void WriteSuccessfulConsumerOutcome()
@@ -253,53 +274,6 @@ internal static class GrpcEventBusLoggerExtensions
                 duration);
         }
 
-        void WriteDeadLetterConsumerOutcome()
-        {
-            if (result.DeserializationFailed)
-            {
-                GrpcEventBusLogMessages.ConsumerDeserializationFailed(
-                    logger,
-                    topic,
-                    tag,
-                    messageId,
-                    brokerName,
-                    queueId,
-                    queueOffset,
-                    deliveryAttempt,
-                    nameof(EventBusDispatchOutcome.DeadLetter),
-                    duration);
-                return;
-            }
-
-            if (settings.IncludePayload)
-            {
-                GrpcEventBusLogMessages.ConsumerDeadLetterWithPayload(
-                    logger,
-                    topic,
-                    tag,
-                    messageId,
-                    brokerName,
-                    queueId,
-                    queueOffset,
-                    deliveryAttempt,
-                    nameof(EventBusDispatchOutcome.DeadLetter),
-                    duration,
-                    EventBusPayloadJsonFormatter.Format(body));
-                return;
-            }
-
-            GrpcEventBusLogMessages.ConsumerDeadLetter(
-                logger,
-                topic,
-                tag,
-                messageId,
-                brokerName,
-                queueId,
-                queueOffset,
-                deliveryAttempt,
-                nameof(EventBusDispatchOutcome.DeadLetter),
-                duration);
-        }
     }
 
     private static string FormatPayload(

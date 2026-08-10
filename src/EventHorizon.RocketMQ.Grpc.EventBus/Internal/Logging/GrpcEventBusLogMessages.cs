@@ -185,51 +185,10 @@ internal static partial class GrpcEventBusLogMessages
         TimeSpan duration);
 
     [LoggerMessage(
-        EventId = 1140,
-        EventName = "EventBusConsumeDeadLetterWithPayload",
-        Level = LogLevel.Error,
-        Message = "EventBus consume completed. Outcome: {Outcome}. Payload: {Payload}. Topic: {Topic}. Tag: {Tag}. " +
-            "MessageId: {MessageId}. BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
-            "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
-        SkipEnabledCheck = true)]
-    internal static partial void ConsumerDeadLetterWithPayload(
-        ILogger logger,
-        string? topic,
-        string? tag,
-        string? messageId,
-        string? brokerName,
-        int? queueId,
-        long? queueOffset,
-        int deliveryAttempt,
-        string outcome,
-        TimeSpan duration,
-        string payload);
-
-    [LoggerMessage(
-        EventId = 1141,
-        EventName = "EventBusConsumeDeadLetter",
-        Level = LogLevel.Error,
-        Message = "EventBus consume completed. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. MessageId: {MessageId}. " +
-            "BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
-            "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
-        SkipEnabledCheck = true)]
-    internal static partial void ConsumerDeadLetter(
-        ILogger logger,
-        string? topic,
-        string? tag,
-        string? messageId,
-        string? brokerName,
-        int? queueId,
-        long? queueOffset,
-        int deliveryAttempt,
-        string outcome,
-        TimeSpan duration);
-
-    [LoggerMessage(
         EventId = 1142,
         EventName = "EventBusPayloadDeserializationFailed",
         Level = LogLevel.Error,
-        Message = "EventBus payload deserialization failed. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. " +
+        Message = "EventBus payload deserialization failed. Action: {Action}. Outcome: {Outcome}. Topic: {Topic}. Tag: {Tag}. " +
             "MessageId: {MessageId}. BrokerName: {BrokerName}. QueueId: {QueueId}. QueueOffset: {QueueOffset}. " +
             "DeliveryAttempt: {DeliveryAttempt}. Duration: {Duration}",
         SkipEnabledCheck = true)]
@@ -242,6 +201,7 @@ internal static partial class GrpcEventBusLogMessages
         int? queueId,
         long? queueOffset,
         int deliveryAttempt,
+        string action,
         string outcome,
         TimeSpan duration);
 

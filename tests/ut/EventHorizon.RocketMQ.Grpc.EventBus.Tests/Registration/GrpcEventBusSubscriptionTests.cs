@@ -64,23 +64,45 @@ public sealed class GrpcEventBusSubscriptionTests
     }
 
     [Fact]
-    public void AddGrpcEventBus_RejectsApplicationManagedPushSubscriptions()
+    public void AddGrpcEventBus_ConsumerConfigurationExposesOnlyTheCuratedPublicSurface()
     {
-        var services = new ServiceCollection();
-        services
-            .AddRocketMQGrpc(ConfigureClient)
-            .AddGrpcEventBus(options =>
-            {
-                options.GroupName = "orders-consumer";
-                options.Subscribe("manual");
-            })
-            .AddHandler<OrderCreatedHandler>();
+        var optionType = typeof(GrpcEventBusConsumerOptions);
+        var expectedProperties = new Dictionary<string, Type>(StringComparer.Ordinal)
+        {
+            [nameof(GrpcEventBusConsumerOptions.GroupName)] = typeof(string),
+            [nameof(GrpcEventBusConsumerOptions.MaxConcurrency)] = typeof(int),
+            [nameof(GrpcEventBusConsumerOptions.BatchSize)] = typeof(int),
+            [nameof(GrpcEventBusConsumerOptions.MaxCachedMessages)] = typeof(int),
+            [nameof(GrpcEventBusConsumerOptions.MaxCachedMessageBytes)] = typeof(int),
+            [nameof(GrpcEventBusConsumerOptions.MaxDeliveryAttempts)] = typeof(int),
+            [nameof(GrpcEventBusConsumerOptions.InvisibleDuration)] = typeof(TimeSpan),
+            [nameof(GrpcEventBusConsumerOptions.ConsumeTimeout)] = typeof(TimeSpan),
+            [nameof(GrpcEventBusConsumerOptions.LongPollingTimeout)] = typeof(TimeSpan),
+            [nameof(GrpcEventBusConsumerOptions.RetryDelay)] = typeof(TimeSpan),
+            [nameof(GrpcEventBusConsumerOptions.SkipDeserializationFailures)] = typeof(bool),
+        };
+        var actualProperties = optionType
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .ToDictionary(
+                static property => property.Name,
+                static property => property.PropertyType,
+                StringComparer.Ordinal);
 
-        using var provider = services.BuildServiceProvider();
+        Assert.True(optionType.IsSealed);
+        Assert.Equal(typeof(object), optionType.BaseType);
+        Assert.False(typeof(GrpcPushConsumerOptions).IsAssignableFrom(optionType));
+        Assert.Equal(expectedProperties.Count, actualProperties.Count);
+        foreach (var (name, propertyType) in expectedProperties)
+        {
+            Assert.True(actualProperties.TryGetValue(name, out var actualType));
+            Assert.Equal(propertyType, actualType);
+        }
 
-        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IGrpcPushConsumer>());
-
-        Assert.Contains("EventBus owns all Push consumer subscriptions", exception.Message, StringComparison.Ordinal);
+        Assert.Null(optionType.GetMethod("Subscribe", BindingFlags.Public | BindingFlags.Instance));
+        Assert.Null(optionType.GetProperty("Subscriptions", BindingFlags.Public | BindingFlags.Instance));
+        Assert.All(
+            optionType.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+            static property => Assert.True(property.SetMethod?.IsPublic));
     }
 
     [Fact]

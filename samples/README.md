@@ -29,6 +29,10 @@ Every project owns its own event contracts, as an application normally would. Th
 is null. The matching Consumer directly registers Handlers for both event shapes. An untagged route generates a `*`
 subscription for its topic while local dispatch still matches `(Topic, null)` exactly.
 
+Consumers use the default `SkipDeserializationFailures = true`: malformed payloads are logged at `Error`, skipped without
+invoking a Handler, and acknowledged as `Success`. Setting it to `false` requests ordinary retry instead. EventBus never
+requests direct DLQ placement; the underlying RocketMQ client and service own eventual retry and DLQ handling.
+
 ## Local RocketMQ
 
 The runnable defaults target the independent

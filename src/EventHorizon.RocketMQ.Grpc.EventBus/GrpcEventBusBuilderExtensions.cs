@@ -10,7 +10,7 @@ public static class GrpcEventBusBuilderExtensions
     /// </summary>
     /// <param name="builder">The RocketMQ gRPC client builder to extend.</param>
     /// <param name="configureConsumer">
-    /// An optional delegate that configures the Push consumer except its EventBus-owned subscriptions.
+    /// An optional delegate that configures the EventBus-owned Push consumer.
     /// </param>
     /// <param name="configureProducer">
     /// An optional delegate that enables and configures EventBus publishing through a gRPC Producer.
@@ -19,8 +19,7 @@ public static class GrpcEventBusBuilderExtensions
     /// <remarks>
     /// Supplying <paramref name="configureProducer"/> creates a Producer and exposes <see cref="IEventBus"/> for
     /// this registration. Registering the first application Handler creates a scoped Push consumer bridge. The
-    /// EventBus owns all Push consumer subscriptions, so <paramref name="configureConsumer"/> must not call
-    /// <c>Subscribe</c>.
+    /// EventBus owns all Push consumer subscriptions. Its option wrapper exposes only supported EventBus settings.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
@@ -29,10 +28,14 @@ public static class GrpcEventBusBuilderExtensions
     /// </exception>
     public static IEventBusBuilder AddGrpcEventBus(
         this GrpcRocketMQBuilder builder,
-        Action<GrpcPushConsumerOptions>? configureConsumer = null,
-        Action<GrpcProducerOptions>? configureProducer = null)
+        Action<GrpcEventBusConsumerOptions>? configureConsumer = null,
+        Action<GrpcEventBusProducerOptions>? configureProducer = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        var consumerOptions = new GrpcEventBusConsumerOptions();
+        configureConsumer?.Invoke(consumerOptions);
+        consumerOptions = consumerOptions.Snapshot();
 
         var registration = EventBusRegistration.Create(
             builder.Services,
@@ -40,11 +43,15 @@ public static class GrpcEventBusBuilderExtensions
             eventBusRegistration => GrpcEventBusRegistration.AddPushConsumer(
                 builder,
                 eventBusRegistration,
-                configureConsumer));
+                consumerOptions),
+            skipDeserializationFailures: consumerOptions.SkipDeserializationFailures);
 
         if (configureProducer is not null)
         {
-            builder.AddGrpcProducer(configureProducer);
+            var producerOptions = new GrpcEventBusProducerOptions();
+            configureProducer(producerOptions);
+            producerOptions = producerOptions.Snapshot();
+            builder.AddGrpcProducer(producerOptions.ApplyTo);
             GrpcEventBusRegistration.AddPublisher(builder, registration);
         }
 

@@ -6,11 +6,14 @@ internal sealed class EventBusDispatchRuntime(
     object registrationToken,
     IEventBusRoutePlan routePlan,
     IIntegrationEventSerializer serializer,
+    EventBusConsumptionSettings consumptionSettings,
     IServiceProvider serviceProvider) : IEventBusDispatchRuntime
 {
     private readonly object _registrationToken = registrationToken ?? throw new ArgumentNullException(nameof(registrationToken));
     private readonly IEventBusRoutePlan _routePlan = routePlan ?? throw new ArgumentNullException(nameof(routePlan));
     private readonly IIntegrationEventSerializer _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly EventBusConsumptionSettings _consumptionSettings =
+        consumptionSettings ?? throw new ArgumentNullException(nameof(consumptionSettings));
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
     public ValueTask<EventBusDispatchResult> DispatchAsync(
@@ -21,7 +24,7 @@ internal sealed class EventBusDispatchRuntime(
     {
         if (!_routePlan.TryGetRoute(topic, tag, out var route))
         {
-            return ValueTask.FromResult(EventBusDispatchResult.DeadLetter(null, 0));
+            return ValueTask.FromResult(EventBusDispatchResult.Retry(null, 0));
         }
 
         return DispatchRouteAsync(route, payload, cancellationToken);
@@ -38,7 +41,7 @@ internal sealed class EventBusDispatchRuntime(
 
         if (!_routePlan.TryGetRoute(topic, tag, out var route) || route.IntegrationEventType != integrationEventType)
         {
-            return ValueTask.FromResult(EventBusDispatchResult.DeadLetter(integrationEventType, 0));
+            return ValueTask.FromResult(EventBusDispatchResult.Retry(integrationEventType, 0));
         }
 
         return DispatchRouteAsync(route, payload, cancellationToken);
@@ -51,7 +54,7 @@ internal sealed class EventBusDispatchRuntime(
     {
         if (route.Handlers.Count == 0)
         {
-            return EventBusDispatchResult.DeadLetter(route.IntegrationEventType, 0);
+            return EventBusDispatchResult.Retry(route.IntegrationEventType, 0);
         }
 
         IntegrationEvent integrationEvent;
@@ -60,10 +63,10 @@ internal sealed class EventBusDispatchRuntime(
             integrationEvent = _serializer.Deserialize(payload, route.IntegrationEventType);
             if (integrationEvent is null || integrationEvent.GetType() != route.IntegrationEventType)
             {
-                return EventBusDispatchResult.DeadLetter(
+                return EventBusDispatchResult.DeserializationFailure(
                     route.IntegrationEventType,
                     route.Handlers.Count,
-                    deserializationFailed: true);
+                    _consumptionSettings.SkipDeserializationFailures);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -72,10 +75,10 @@ internal sealed class EventBusDispatchRuntime(
         }
         catch (Exception)
         {
-            return EventBusDispatchResult.DeadLetter(
+            return EventBusDispatchResult.DeserializationFailure(
                 route.IntegrationEventType,
                 route.Handlers.Count,
-                deserializationFailed: true);
+                _consumptionSettings.SkipDeserializationFailures);
         }
 
         foreach (var handlerRegistration in route.Handlers)

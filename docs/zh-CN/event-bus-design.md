@@ -56,8 +56,8 @@ EventHorizon.RocketMQ.Remoting                EventHorizon.RocketMQ.Grpc
 
 传输层各自定义的 `ConsumeResult` 不会进入 EventBus 公开 API。公共分发流程只产生内部的传输无关结果，再由每个
 适配器显式映射到其主项目包中的结果契约。已发布的 gRPC 客户端提供 sealed record（`Success`、`Failure` 和仅供
-LitePush 使用的 `Suspend`），已发布的 Remoting 客户端提供只包含 `Success`、`Retry` 的枚举；结果映射以及 Remoting
-PULL/POP 的处置差异见 [`ConsumeResult` 处理设计](consume-result-design.md#包边界)。
+LitePush 使用的 `Suspend`），已发布的 Remoting 客户端提供只包含 `Success`、`Retry` 的枚举；结果映射以及由传输层负责的
+普通重试和最终处置策略见 [`ConsumeResult` 处理设计](consume-result-design.md#包边界)。
 
 ### NuGet 发布方式
 
@@ -140,7 +140,7 @@ EventBus 契约不支持 SQL92 表达式。
 
 Core 通过传输层自有的回调创建 Consumer，并让分发逻辑独立于 Push 实现。Classic Remoting POP 是同一个 Push
 Consumer 的内部接收引擎，因此继续使用 `AddRemotingEventBus`、同一个桥接 Handler 和同一张 `(Topic, Tag)`
-路由表。应用可以通过 `RemotingPushConsumerOptions` 请求由 Broker 分配队列；随后，每条 Broker assignment 决定
+路由表。应用可以通过 `RemotingEventBusConsumerOptions` 请求由 Broker 分配队列；随后，每条 Broker assignment 决定
 主 Client 使用 PULL 还是 POP。EventBus 不修改 Broker 上按 Topic 与 Consumer Group 配置的 request mode，也不接管
 POP receipt 或消息处置。
 
@@ -267,16 +267,35 @@ API 会直接衔接 `EventHorizon.RocketMQ` 提供的 Builder，并返回用于�
 ```csharp
 IEventBusBuilder AddRemotingEventBus(
     this RemotingRocketMQBuilder builder,
-    Action<RemotingPushConsumerOptions>? configureConsumer = null,
-    Action<RemotingProducerOptions>? configureProducer = null);
+    Action<RemotingEventBusConsumerOptions>? configureConsumer = null,
+    Action<RemotingEventBusProducerOptions>? configureProducer = null);
 
 IEventBusBuilder AddGrpcEventBus(
     this GrpcRocketMQBuilder builder,
-    Action<GrpcPushConsumerOptions>? configureConsumer = null,
-    Action<GrpcProducerOptions>? configureProducer = null);
+    Action<GrpcEventBusConsumerOptions>? configureConsumer = null,
+    Action<GrpcEventBusProducerOptions>? configureProducer = null);
 ```
 
-Remoting 的队列分配通过现有 Push options 配置，不需要增加 EventBus mode：
+这里的参数是 EventBus 自己定义的协议专用配置封装，并不是主 Client options 的别名。EventBus 公开 API 不接收或返回
+原始的 `GrpcPushConsumerOptions`、`RemotingPushConsumerOptions`、`GrpcProducerOptions` 或
+`RemotingProducerOptions`；适配器会校验不可变的配置快照，再在内部映射到对应的主 Client options。
+`EventBusLoggingOptions` 仍是独立的 registration 级契约，通过 `ConfigureLogging` 配置。
+
+这些配置封装只暴露经过筛选的设置：
+
+| Wrapper | 公开属性 |
+| --- | --- |
+| `GrpcEventBusConsumerOptions` | `GroupName`、`MaxConcurrency`、`BatchSize`、`MaxCachedMessages`、`MaxCachedMessageBytes`、`MaxDeliveryAttempts`、`InvisibleDuration`、`ConsumeTimeout`、`LongPollingTimeout`、`RetryDelay`、`SkipDeserializationFailures` |
+| `RemotingEventBusConsumerOptions` | `GroupName`、`InitialPosition`、`ConsumeTimestamp`、`MaxConcurrency`、`PullBatchSize`、`PopBatchSize`、`PopInvisibleDuration`、`PopMaxInflightMessagesPerAssignment`、`PullMaxCachedMessages`、`PullMaxCachedMessageBytes`、`MaxMessageBytes`、`MaxDeliveryAttempts`、`LongPollingTimeout`、`RetryDelay`、`ConsumeTimeout`、`QueueAssignmentMode`、`SkipDeserializationFailures` |
+| `GrpcEventBusProducerOptions` | `SendMsgTimeout`、`RetryTimesWhenSendFailed`、`MaxMessageSize` |
+| `RemotingEventBusProducerOptions` | `GroupName`、`DefaultTopicQueueNums`、`SendMsgTimeout`、`CompressMsgBodyOverHowmuch`、`RetryTimesWhenSendFailed`、`MaxMessageSize` |
+
+两个 Consumer 配置类型的 `SkipDeserializationFailures` 默认值都是 `true`。EventBus 始终根据已注册的 `(Topic, Tag)`
+路由生成订阅；配置委托不能添加或替换 `Subscribe`。Remoting EventBus 只支持 clustering、并发消费以及每次
+EventBus 分发一条物理消息；其配置封装不暴露 orderly、broadcast 或 local offset 设置。Producer 配置封装不暴露事务
+回调，事务发布不属于 EventBus 契约。
+
+Remoting 的队列分配通过 EventBus 自有 Consumer 配置封装，不需要增加 EventBus mode：
 
 ```csharp
 builder.Services
@@ -414,6 +433,7 @@ builder.Services
     {
         options.GroupName = "ordering-service";
         options.MaxConcurrency = 8;
+        options.SkipDeserializationFailures = true;
     })
     .AddHandlersFromAssemblyOf<Program>();
 
@@ -435,6 +455,7 @@ builder.Services
     {
         options.GroupName = "ordering-service";
         options.MaxConcurrency = 8;
+        options.SkipDeserializationFailures = true;
     })
     .AddHandlersFromAssemblyOf<Program>();
 
@@ -511,8 +532,8 @@ I/O，也不能根据不同进程的状态动态生成路由。
 枚举顺序或 Handler 注册顺序不会导致同一个 Consumer Group 的不同成员生成不同的订阅字符串。
 
 Push Consumer 的全部订阅都由 EventBus 管理。应用可以配置 group name、并发度、重试、超时、预取和缓存参数，
-但不能在 `AddRemotingEventBus` 或 `AddGrpcEventBus` 中调用 `Subscribe`。Remoting 适配器会拒绝 `Broadcasting`，
-并强制设置 `ConsumeMessageBatchSize = 1`。
+但不能在 `AddRemotingEventBus` 或 `AddGrpcEventBus` 中调用 `Subscribe`。Remoting 适配器会拒绝 `Orderly` 和
+`Broadcasting`，并强制设置 `ConsumeMessageBatchSize = 1`。
 
 ### 单个 Handler 注册
 
@@ -608,8 +629,9 @@ HostedService 也可以避免 EventBus 适配器再创建一套重复的后台�
 | 发布失败或返回非成功结果 | `Error` | Topic、Tag、耗时、异常或传输结果，以及可以生成时的 `Payload` |
 | Consumer 分发结果为 `Success` | `Information` | Topic、Tag、Message ID、Broker 名称、Queue ID、Queue Offset、投递次数、耗时、结果和 `Payload` |
 | Handler 或依赖失败后，EventBus 请求 `Retry` | `Error` | 相同的投递字段、重试结果、可以获得的异常和 `Payload` |
-| EventBus 因路由未知分类为内部 `DeadLetter` | `Error` | 可获得的投递字段、内部结果，以及来自实际 Body 的 `Payload`；Remoting 以 `Retry` 和条件性的 `-1` 延迟哨兵值处置 |
-| EventBus 因反序列化失败分类为内部 `DeadLetter` | `Error` | 可获得的投递字段和内部结果；不包含 `Payload` 字段；Remoting 仍以 `Retry` 和条件性的 `-1` 延迟哨兵值处置 |
+| EventBus 因未知路由或无效注册状态请求 `Retry` | `Error` | 可获得的投递字段、重试结果，以及来自实际 Body 的 `Payload` |
+| EventBus 跳过反序列化失败（`SkipDeserializationFailures = true`） | `Error` | 可获得的投递字段、`Success` 结果和明确的跳过动作；不包含 `Payload` 字段 |
+| EventBus 因反序列化失败请求 `Retry`（`SkipDeserializationFailures = false`） | `Error` | 可获得的投递字段、`Retry` 结果和明确的重试动作；不包含 `Payload` 字段 |
 
 消费超时和投递 Scope 生命周期失败由主客户端负责处理与记录。它们可能在 EventBus 分发调用已经返回或被放弃后
 触发传输层重试，因此不会再生成一个新的 EventBus 结果。
@@ -675,14 +697,16 @@ EventBus 会为每次完成的分发尝试给出以下内部结果：
 | 路由匹配、反序列化成功且全部 Handler 成功 | `Success` |
 | Handler 或它的依赖抛出异常 | `Retry` |
 | `ConsumeTimeout` 到期 | `Retry`，由底层 Push Consumer 执行 |
-| 反序列化失败，或序列化器返回无效事件 | `DeadLetter` |
-| 收到的 Topic 与 Tag 没有匹配事件 | `DeadLetter` |
+| 反序列化失败，或序列化器返回无效事件，且 `SkipDeserializationFailures = true`（默认） | `Success`，并带有 `DeserializationFailed = true`；不运行 Handler，并以 `Error` 记录失败 |
+| 反序列化失败，或序列化器返回无效事件，且 `SkipDeserializationFailures = false` | `Retry`，并带有 `DeserializationFailed = true`；不运行 Handler，并以 `Error` 记录失败 |
+| 收到的 Topic 与 Tag 没有匹配事件 | `Retry`；以 `Error` 记录失败，并进入传输层普通重试 |
+| 路由存在，但注册状态不一致导致没有可执行的 Handler | `Retry`；以 `Error` 记录配置错误 |
 | Host 停止并取消本次投递 | 继续传播取消，不强制生成新结果 |
 
-协议适配器再把内部分类映射到主 Client 的结果。gRPC 将 `Retry` 和 `DeadLetter` 都映射为 `Failure`，EventBus
-不会发出 `Suspend`。Remoting 将内部 `Success` 映射为 `Success`，把两个失败状态都映射为 `Retry`。内部
-`DeadLetter` 还会设置 `DelayLevelWhenNextConsume = -1`；只有并发 PULL 会把这个哨兵值解释为直接进入 DLQ，POP 会将
-其归一化为 `0` 并按正常重试进度处理。完整映射见 [`ConsumeResult` 处理设计](consume-result-design.md)。
+协议适配器再把内部分类映射到主 Client 的结果。gRPC 将 `Success` 映射为 `Success`，将 `Retry` 映射为 `Failure`，
+并且 EventBus 不会发出 `Suspend`。Remoting 将 `Success` 映射为 `Success`，将 `Retry` 映射为 `Retry`，并保持
+`RemotingPushConsumeContext.DelayLevelWhenNextConsume` 的默认值 `0`。EventBus 绝不设置负延迟哨兵值，也不请求直接
+进入 DLQ；普通重试进度和最终处置策略由底层传输层负责。完整映射见 [`ConsumeResult` 处理设计](consume-result-design.md)。
 
 两个适配器都不提供 exactly-once 投递。重试可能与忽略取消信号的 Handler 重叠；多个 Handler 中已经执行成功的
 部分也可能再次执行。消费端必须保证副作用幂等。
@@ -711,7 +735,7 @@ API 对称性、独立的传输层枚举与映射、Core 自有泛型 registrati
 Integration Test Suite 都在 Generic Host 中启动 Producer 和 Push Consumer，并发发布十二条带 Tag 和十二条无 Tag 的
 事件，验证匹配 Handler 对每个事件只观察到一次，并确认三个 Broker 都存储了消息。Remoting Suite 还会使用独立的
 Topic 与 Group，通过成功的 `ack` settlement Activity 验证 Broker 分配的 POP；原有流程继续覆盖默认的 Client
-分配 PULL。其余确定性的结果映射、Retry、DeadLetter、named registration 和生命周期分支由 Unit Tests 覆盖。
+分配 PULL。其余确定性的结果映射、Retry、反序列化策略、named registration 和生命周期分支由 Unit Tests 覆盖。
 
 Samples 沿用主项目按协议组织的方式。每个适配器分别提供 Web API Publisher 与 Generic Host Consumer 示例，让未使用
 的传输角色确实不存在这一行为保持可见；默认 registration 和 `orders` named registration 放在同一个协议 sample 中，
@@ -798,10 +822,10 @@ README 保持协议无关，并链接到两个适配器。本仓库使用 MIT Li
    Topic 只要包含无 Tag 路由，Consumer 就使用 `*` 过滤表达式。
 3. 每个具体集成事件类型都必须提供公开无参构造函数。注册过程使用它发现路由，无需 Attribute、static
    abstract 成员或应用服务。
-4. Handler 失败时产生内部 `Retry`；反序列化失败和未知路由产生内部 `DeadLetter`。Remoting 把两个失败状态都映射
-   为 `Retry`；对于 `DeadLetter` 还会设置 `DelayLevelWhenNextConsume = -1`，该哨兵值只会在并发 PULL 时请求直接
-   进入 DLQ，POP 会将其归一化。gRPC 会把两类失败都映射为 `Failure`，由底层 Push 客户端与服务端按实际重试/DLQ
-   策略完成最终处置。
+4. 内部结果只有 `Success` 和 `Retry`。Handler 失败、未知路由和无效注册状态都会产生 `Retry`。反序列化失败会以
+   `Error` 记录，不调用业务 Handler；默认 `SkipDeserializationFailures = true` 时产生带有 `DeserializationFailed`
+   的 `Success`，设为 `false` 时产生普通 `Retry`。Remoting 将 `Retry` 映射为保持默认延迟的 `Retry`，gRPC 将其映射为
+   `Failure`，两个适配器都不请求直接进入 DLQ。
 5. EventBus 每次调用只反序列化并分发一条消息，同时保留可配置的传输预取和消费并发度；Remoting Handler
    批量回调固定为 1。
 6. 公开命名使用 `EventHorizon.RocketMQ.EventBus`、`IntegrationEvent` 和

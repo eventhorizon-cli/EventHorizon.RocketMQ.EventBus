@@ -6,7 +6,6 @@ internal static class GrpcEventBusConsumeResultMapper
     {
         EventBusDispatchOutcome.Success => ConsumeResult.Success,
         EventBusDispatchOutcome.Retry => ConsumeResult.Failure,
-        EventBusDispatchOutcome.DeadLetter => ConsumeResult.Failure,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown EventBus dispatch outcome."),
     };
 }

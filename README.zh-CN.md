@@ -71,7 +71,11 @@ public sealed class OrderSubmittedIntegrationEventHandler
 builder.Services
     .AddRocketMQGrpc(options => options.Endpoint = "http://localhost:8081")
     .AddGrpcEventBus(
-        configureConsumer: options => options.GroupName = "ordering-service",
+        configureConsumer: options =>
+        {
+            options.GroupName = "ordering-service";
+            options.SkipDeserializationFailures = true; // default: log, skip, and acknowledge malformed payloads
+        },
         configureProducer: static _ => { })
     .AddHandlersFromAssemblyOf<Program>();
 ```
@@ -80,6 +84,8 @@ builder.Services
 
 `configureProducer` 用于启用发布能力并注册 `IEventBus`；纯消费服务可以省略它。注册第一个处理器时才会添加 Push
 Consumer，因此纯发布服务不会启动空 Consumer。
+两个委托接收的都是协议专属 EventBus 选项包装类型，而不是底层客户端选项。Producer 包装类型只配置普通发送参数；
+EventBus 不暴露原始订阅，也不暴露事务 Topic 和事务检查回调。
 
 通过默认注册发布事件：
 
@@ -104,8 +110,20 @@ EventBus 注册项中，区分大小写且按序号比较的 `(Topic, Tag)` 只�
 序列化和发送失败统一抛出 `EventBusPublishException`；调用方主动取消时仍抛出
 `OperationCanceledException`。
 
-消费时，只有全部匹配的处理器都成功完成，消息才算处理成功。处理器失败会请求重试；未知路由和无效 Payload 会
-请求死信处理。适配器会根据对应协议客户端的能力映射这些结果。
+消费时，只有全部匹配的处理器都成功完成，消息才算处理成功。处理器失败和未知路由都会请求普通重试。请在
+`configureConsumer` 接收的协议专属 `GrpcEventBusConsumerOptions` 或 `RemotingEventBusConsumerOptions` 包装类型中，
+设置注册项级别的 `SkipDeserializationFailures`。
+
+默认值为 `true`：EventBus 会以 `Error` 级别记录格式错误的 Payload，并明确记录跳过动作；不写入 `Payload` 字段，不调用
+任何处理器，并以 `Success` 确认消息。设置为 `false` 时同样不会调用处理器，但会明确记录重试动作并请求普通重试。
+
+| 设置 | 是否调用处理器 | EventBus 内部结果 | 协议映射与传输层处置 |
+| --- | --- | --- | --- |
+| `true`（默认） | 不调用 | `Success` | gRPC `Success`；Remoting `Success`，正常确认消息 |
+| `false` | 不调用 | `Retry` | gRPC `Retry` -> `Failure`；Remoting `Retry` -> `Retry`，保持默认延迟 `0`，执行普通传输层重试 |
+
+EventBus 绝不请求直接进入 DLQ。最终的重试和 DLQ 处置由底层客户端或服务端负责。处理器失败和未知路由同样使用
+上述 `Retry` 映射。
 
 ## 日志
 
