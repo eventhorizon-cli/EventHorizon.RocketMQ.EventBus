@@ -38,18 +38,43 @@ builder.Services.AddRocketMQRemoting(options =>
 A RocketMQ 5 Proxy address is not a Remoting `NamesrvAddr`. See the underlying Remoting client guide for TLS, ACL,
 namespace, and multi-NameServer configuration.
 
-## PULL and POP inside Push
+## Queue assignment and PULL/POP
 
-The EventBus always exposes one Push-consumer programming model. Queue assignment controls which receive path the
-underlying Remoting client uses:
+`RemotingEventBusConsumerOptions.QueueAssignmentMode` exposes the underlying Remoting client's
+`RemotingPushQueueAssignmentMode`. EventBus deliberately does not expose the raw
+`RemotingPushConsumerOptions` object, but this setting is available through its consumer wrapper.
 
-| `QueueAssignmentMode` | Queue assignment and receive behavior |
-| --- | --- |
-| `RemotingPushQueueAssignmentMode.Client` | Default. The client assigns queues and receives with PULL. |
-| `RemotingPushQueueAssignmentMode.Broker` | The Broker assigns queues; each returned assignment may use PULL or POP according to Broker configuration. |
+Queue assignment and message reception are separate decisions. `QueueAssignmentMode` is not a PULL/POP selector:
 
-Switching between these modes does not change the EventBus API or handler contract. Broker assignment requires the
-corresponding Broker-side assignment request mode to be configured.
+| Setting | Queue assignment | Internal reception |
+| --- | --- | --- |
+| `RemotingPushQueueAssignmentMode.Client` | Client | Always PULL |
+| `RemotingPushQueueAssignmentMode.Broker` | Broker | The Broker returns PULL or POP for each assignment |
+
+Configure Broker assignment on the consuming registration:
+
+```csharp
+using EventHorizon.RocketMQ.Remoting.Consumer.Push;
+
+builder.Services
+    .AddRocketMQRemoting(options => options.NamesrvAddr = "localhost:9876")
+    .AddRemotingEventBus(configureConsumer: options =>
+    {
+        options.GroupName = "ordering-service";
+        options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+    });
+```
+
+`Broker` is supported because EventBus uses concurrent clustering Push consumption. It asks the Broker for assignments;
+the Broker's request-mode configuration for each `(Topic, Consumer Group)` chooses PULL or POP. When no topic-and-group
+override exists, the Broker uses its server default, which is normally PULL but can be changed by operations. One
+Broker-assigned group can therefore use POP for one topic and PULL for another. A classic `%RETRY%<group>` topic remains
+PULL, so a group can also have application POP receivers alongside an internal retry PULL receiver.
+
+EventBus never changes the Broker configuration or manages POP receipts. With `Client`, the consumer remains PULL even
+when the Broker has a POP request-mode configuration. All instances in one consumer group must use the same assignment
+mode. A Broker request-mode change can switch PULL and POP during reconciliation; uncommitted or unacknowledged messages
+may be delivered again, so handlers must be idempotent.
 
 For POP, processing must finish within `PopInvisibleDuration`. Classic Remoting Push does not automatically renew the
 receipt while a handler is running, so configure the invisible duration for the longest expected processing time.

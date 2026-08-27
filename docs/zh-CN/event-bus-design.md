@@ -308,9 +308,20 @@ builder.Services
         });
 ```
 
-主 Client 默认使用 `Client`：由 Client 分配队列，并通过 PULL 接收消息。`Broker` 适用于 EventBus 已支持的
-Clustering 并发消费；Broker 根据运维侧 request-mode 配置，在每条 assignment 中返回 PULL 或 POP。两条路径调用
-相同的 EventBus Handler。POP 使用主 Client 固定的 `PopInvisibleDuration` 处理期限，EventBus 不会另建租期续约循环。
+`QueueAssignmentMode` 使用原始 Remoting Client 的 `RemotingPushQueueAssignmentMode`，只是由 EventBus 自有包装类型
+选择性公开。它决定队列由谁分配，并不直接选择 PULL 或 POP：主 Client 默认的 `Client` 始终由 Client 分配队列并通过
+PULL 接收；`Broker` 会让并发 Clustering Push Consumer 发送 `QUERY_ASSIGNMENT`，每条返回的 assignment 再选择内部 PULL
+或 POP receiver。两条路径调用同一个 EventBus Handler。
+
+Broker 按 `(Topic, Consumer Group)` 查找消费请求模式。存在专属配置时使用该配置；普通 Topic 没有专属配置时使用
+Broker 的 `defaultMessageRequestMode`，通常为 PULL，但运维可以改为 POP。经典 `%RETRY%<group>` Topic 始终使用 PULL。
+因此，同一个 Broker-assigned Group 可以让一个或多个业务 Topic 使用 POP，同时让其他业务 Topic 或 retry Topic 使用
+PULL。EventBus 有意不提供直接选择 POP 的 API，不修改 Broker request-mode 配置，也不接管 POP receipt 和消息处置。
+
+同一个 Consumer Group 的全部 Push 实例必须选择一致的分配方式。Broker 的请求模式从 PULL 切换为 POP 或反向切换时，主
+Client 会在协调期间应用变化，旧 receiver 尚未提交或确认的消息可能重新投递，因此 EventBus Handler 必须幂等。使用
+`Client` 的 Consumer 始终通过 PULL 接收；若要改为 Broker 分配，需要让同组全部实例一致切换为 `Broker`。POP 使用主
+Client 固定的 `PopInvisibleDuration` 处理期限，EventBus 不会另建租期续约循环。
 
 最常见的单委托调用只配置 Push Consumer，不会创建 Producer。发送超时、发送重试、消息大小限制和 Remoting
 Producer Group 等参数通过具名参数 `configureProducer` 配置。即使传入空的非 `null` Producer 委托，也会使用

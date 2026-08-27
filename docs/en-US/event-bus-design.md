@@ -326,10 +326,23 @@ builder.Services
         });
 ```
 
-`Client`, the main-client default, performs client-side queue allocation and uses PULL. `Broker` is valid for the
-EventBus clustering and concurrent-consumption contract; the Broker returns PULL or POP in each assignment according
-to its administrative request-mode configuration. Both paths invoke the same EventBus handler. POP uses the main
-client's fixed `PopInvisibleDuration` deadline and does not add a lease-renewal loop to EventBus.
+`QueueAssignmentMode` is the original Remoting client's `RemotingPushQueueAssignmentMode`, exposed selectively through
+the EventBus-owned wrapper. It is an assignment-owner choice rather than a PULL/POP choice: `Client`, the main-client
+default, always uses client queue allocation and PULL; `Broker` makes the concurrent clustered Push consumer issue
+`QUERY_ASSIGNMENT`, and every returned assignment selects an internal PULL or POP receiver. Both paths invoke the same
+EventBus handler.
+
+The Broker resolves its request mode at `(Topic, Consumer Group)` scope. A configured request mode wins; otherwise a
+normal topic uses the Broker's `defaultMessageRequestMode`, which is normally PULL but can be changed by operations.
+Classic `%RETRY%<group>` topics are always PULL. Consequently, one Broker-assigned group can have POP receivers for one
+or more application topics while retaining PULL receivers for other application or retry topics. EventBus intentionally
+does not expose a direct POP selector, modify Broker request-mode configuration, or own POP receipts and settlement.
+
+All Push instances in one consumer group must use the same assignment mode. Changing a Broker request mode from PULL to
+POP or back is reconciled by the main client and can redeliver messages that were not committed or acknowledged before
+the receiver changes; EventBus handlers must therefore be idempotent. A `Client` consumer remains PULL until every
+instance is consistently changed to `Broker`. POP uses the main client's fixed `PopInvisibleDuration` deadline and does
+not add a lease-renewal loop to EventBus.
 
 The common one-delegate call configures the Push consumer and does not create a Producer. Producer settings such as
 send timeout, retry count, message-size limit, and the Remoting producer group use the named `configureProducer`

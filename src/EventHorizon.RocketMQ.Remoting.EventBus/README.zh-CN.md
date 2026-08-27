@@ -35,16 +35,42 @@ builder.Services.AddRocketMQRemoting(options =>
 RocketMQ 5 Proxy 地址不能作为 Remoting 的 `NamesrvAddr`。TLS、ACL、Namespace 和多个 NameServer 的配置方式请参阅
 底层 Remoting 客户端使用说明。
 
-## Push 内部的 PULL 与 POP
+## 队列分配与 PULL/POP
 
-EventBus 始终只暴露一套 Push Consumer 编程模型。队列分配方式决定底层 Remoting 客户端使用哪条接收路径：
+`RemotingEventBusConsumerOptions.QueueAssignmentMode` 公开的是底层 Remoting Client 的
+`RemotingPushQueueAssignmentMode`。EventBus 不公开原始 `RemotingPushConsumerOptions` 对象，但会通过自己的
+Consumer 包装类型提供这个设置。
 
-| `QueueAssignmentMode` | 队列分配与接收方式 |
-| --- | --- |
-| `RemotingPushQueueAssignmentMode.Client` | 默认值。由客户端分配队列，并使用 PULL 接收。 |
-| `RemotingPushQueueAssignmentMode.Broker` | 由 Broker 分配队列；每条分配结果根据 Broker 配置使用 PULL 或 POP。 |
+队列由谁分配，与消息如何接收是两个独立的决定。`QueueAssignmentMode` 不是 PULL/POP 选择器：
 
-切换模式不会改变 EventBus API 和处理器契约。使用 Broker 分配前，需要先在 Broker 端配置相应的队列分配模式。
+| 设置 | 队列分配 | 内部接收方式 |
+| --- | --- | --- |
+| `RemotingPushQueueAssignmentMode.Client` | Client | 始终 PULL |
+| `RemotingPushQueueAssignmentMode.Broker` | Broker | Broker 为每条 assignment 返回 PULL 或 POP |
+
+在消费 registration 中启用 Broker 分配：
+
+```csharp
+using EventHorizon.RocketMQ.Remoting.Consumer.Push;
+
+builder.Services
+    .AddRocketMQRemoting(options => options.NamesrvAddr = "localhost:9876")
+    .AddRemotingEventBus(configureConsumer: options =>
+    {
+        options.GroupName = "ordering-service";
+        options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
+    });
+```
+
+EventBus 使用并发 Clustering Push 消费，因此支持 `Broker`。Client 会向 Broker 查询 assignment；Broker 再按照每个
+`(Topic, Consumer Group)` 的消费请求模式决定 PULL 或 POP。没有 Topic 与 Group 专属配置时，Broker 使用服务端默认值，
+通常是 PULL，但运维可以改成 POP。因此，同一个 Broker-assigned Group 可以让一个 Topic 使用 POP，而另一个 Topic 使用
+PULL。经典 `%RETRY%<group>` Topic 始终通过 PULL 接收，所以同一 Group 也可能同时拥有业务 POP receiver 和内部 retry
+PULL receiver。
+
+EventBus 不会修改 Broker 配置，也不管理 POP receipt。使用 `Client` 时，即使 Broker 的请求模式为 POP，Consumer 仍会
+通过 PULL 接收。同一 Consumer Group 的全部实例必须选择同一种分配方式。Broker 的请求模式在协调期间从 PULL 切换到
+POP 或反向切换时，尚未提交或尚未确认的消息可能再次投递，因此处理器必须保持幂等。
 
 使用 POP 时，消息处理必须在 `PopInvisibleDuration` 内完成。Classic Remoting Push 不会在处理器执行期间自动续约
 消息收据，因此需要按最长预期处理时间配置不可见时长。

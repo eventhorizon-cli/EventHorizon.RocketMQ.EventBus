@@ -12,7 +12,7 @@ Consumer 角色由现有 `IHostedService` 启停；sample 代码不会手动调�
 | `grpc/Publisher` | 通过 RocketMQ 5 Proxy 的 Web API 发布，包含默认和 `orders` keyed EventBus registration |
 | `grpc/Consumer` | 默认与 `orders` registration 的 gRPC 客户端主动长轮询 Push 消费 |
 | `remoting/Publisher` | 通过 NameServer 发现路由、Broker 直连的 Web API 发布，包含默认和 `orders` registration |
-| `remoting/Consumer` | 逐条分发的 clustered Remoting Push 消费，包含默认与 `orders` registration |
+| `remoting/Consumer` | 逐条分发的 clustered Remoting Push 消费；默认 registration 演示 Broker 分配，`orders` registration 使用 Client 分配 |
 
 Publisher samples 传入非 `null` 的 `configureProducer`，因此暴露 `IEventBus`。Consumer samples 省略该委托；它们
 只在首次注册 Handler 后创建 Push Consumer，也无法解析 `IEventBus`。
@@ -42,6 +42,7 @@ stack。gRPC 项目连接 Proxy Endpoint；Remoting 项目查询 NameServer，�
 
 ## 范围
 
-Samples 演示普通事件发布、Push 消费、直接 Handler 注册、结构化日志和 named DI。
-Pull、Simple、POP、LitePush、FIFO、事务、延迟、优先级、批量、请求-响应、SQL92 和运行时订阅变更不属于首版
+Samples 演示普通事件发布、Push 消费、直接 Handler 注册、结构化日志和 named DI。Remoting Consumer 还包含可选的
+Broker-assigned POP 演练：默认 Broker 分配使用 Broker 的 PULL 默认值，其 README 给出了按 Topic 与 Group 修改请求模式
+的命令。独立 Pull、Simple、LitePush、FIFO、事务、延迟、优先级、批量、请求-响应、SQL92 和运行时订阅变更不属于首版
 EventBus 契约，因此不会出现在 samples 中。

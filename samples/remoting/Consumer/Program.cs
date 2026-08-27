@@ -2,6 +2,7 @@ using EventHorizon.RocketMQ.EventBus;
 using EventHorizon.RocketMQ.EventBus.Samples.Remoting.Consumer.Handlers;
 using EventHorizon.RocketMQ.EventBus.Samples.Remoting.Consumer.Handlers.Orders;
 using EventHorizon.RocketMQ.Remoting;
+using EventHorizon.RocketMQ.Remoting.Consumer.Push;
 using EventHorizon.RocketMQ.Remoting.EventBus;
 using Microsoft.Extensions.Hosting;
 
@@ -17,6 +18,8 @@ builder.Services
     {
         options.GroupName = "eventbus-remoting-sample";
         options.MaxConcurrency = 8;
+        // The Broker selects PULL or POP per (Topic, Consumer Group); this is not a POP selector.
+        options.QueueAssignmentMode = RemotingPushQueueAssignmentMode.Broker;
         options.SkipDeserializationFailures = true;
     })
     // If every Handler in this assembly belongs to this registration, replace the individual calls below with:

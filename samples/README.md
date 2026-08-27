@@ -13,7 +13,7 @@ sample code does not call transport `StartAsync` or `StopAsync` methods.
 | `grpc/Publisher` | Web API publishing through a RocketMQ 5 Proxy with default and `orders` keyed EventBus registrations |
 | `grpc/Consumer` | gRPC client-initiated Push consumption with default and `orders` registrations |
 | `remoting/Publisher` | Web API publishing after NameServer route discovery and direct Broker selection, with default and `orders` registrations |
-| `remoting/Consumer` | clustered Remoting Push consumption with one-message dispatch and default plus `orders` registrations |
+| `remoting/Consumer` | clustered Remoting Push consumption with one-message dispatch; its default registration demonstrates Broker assignment and its `orders` registration uses Client assignment |
 
 Publisher samples pass a non-null `configureProducer` delegate and therefore expose `IEventBus`. Consumer samples omit
 that delegate; they create a Push consumer only after registering the first Handler and cannot resolve `IEventBus`.
@@ -46,6 +46,7 @@ command, protocol topology, configuration defaults, and which optional EventBus 
 ## Scope
 
 Samples demonstrate ordinary event publishing, Push consumption, direct Handler registration, structured logging,
-and named DI. They do not demonstrate Pull, Simple, POP, LitePush,
-FIFO, transactional, delay, priority, batch, request-reply, SQL92, or runtime subscription changes because those APIs
-are outside the first-release EventBus contract.
+and named DI. The Remoting Consumer also includes an opt-in Broker-assigned POP exercise: its normal Broker assignment
+uses the Broker's PULL default, and its README shows the topic-and-group request-mode commands required to change that.
+Standalone Pull, Simple, LitePush, FIFO, transactional, delay, priority, batch, request-reply, SQL92, and runtime
+subscription changes are outside the first-release EventBus contract.
