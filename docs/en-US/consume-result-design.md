@@ -12,7 +12,7 @@ The transport packages intentionally expose different result contracts:
 - `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult` (gRPC client [`grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)) is a sealed record with `Success` and
   `Failure` results plus the `Suspend(TimeSpan)` factory. EventBus uses the regular Push contract and emits only
   `Success` or `Failure`; `Suspend` is a LitePush capability and is never emitted by EventBus.
-- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult` (Remoting client [`remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)) is an enum with only `Success` and
+- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult` (Remoting client [`remoting-v0.6.2`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.2/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)) is an enum with only `Success` and
   `Retry`. EventBus uses normal retry with the default delay and never requests direct dead-letter settlement.
 
 EventBus applies the same route, payload, and handler classification for both protocols, then maps that internal

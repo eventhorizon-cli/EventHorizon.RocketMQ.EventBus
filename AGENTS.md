@@ -55,7 +55,7 @@ documented EventBus-specific reason to differ.
   [gRPC `grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)
   client, the former is a sealed record with `Success`, `Failure`, and a LitePush-only `Suspend` factory; EventBus emits
   only `Success` or `Failure`. Against the released
-  [Remoting `remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)
+  [Remoting `remoting-v0.6.2`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.2/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)
   client, the latter enum contains
   only `Success` and `Retry`. The internal common outcome also contains only `Success` and `Retry`; map it with an
   explicit switch and never cast by numeric value. EventBus never requests direct DLQ settlement or sets a negative

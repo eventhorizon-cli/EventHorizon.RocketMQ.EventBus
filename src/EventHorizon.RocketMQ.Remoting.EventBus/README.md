@@ -187,7 +187,7 @@ the log records an explicit retry action and EventBus requests ordinary retry in
 | Deserialization fails with `SkipDeserializationFailures = false` | `Retry` with a deserialization-failure diagnostic | `ConsumeResult.Retry`, with the default delay level `0` |
 | Host shutdown cancels delivery | Cancellation is propagated without manufacturing a result | Cancellation is propagated |
 
-The Remoting client 0.6.1 `ConsumeResult` enum has only `Success` and `Retry`. EventBus never sets a negative delay-level
+The Remoting client 0.6.2 `ConsumeResult` enum has only `Success` and `Retry`. EventBus never sets a negative delay-level
 sentinel or requests direct DLQ placement: internal `Retry` maps to `ConsumeResult.Retry` and leaves
 `RemotingPushConsumeContext.DelayLevelWhenNextConsume` at its default `0`. Normal retry progression and any eventual
 DLQ decision remain with the underlying Remoting client and service. The gRPC adapter maps the same internal `Retry` to

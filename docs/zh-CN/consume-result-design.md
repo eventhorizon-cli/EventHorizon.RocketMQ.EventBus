@@ -12,7 +12,7 @@
 - `EventHorizon.RocketMQ.Grpc.Consumer.ConsumeResult`（gRPC 客户端 [`grpc-v0.4.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/grpc-v0.4.1/src/EventHorizon.RocketMQ.Grpc/Consumer/ConsumeResult.cs)）是 sealed record，包含 `Success`、`Failure`
   结果以及 `Suspend(TimeSpan)` 工厂方法。EventBus 使用普通 Push 契约，只会发出 `Success` 或 `Failure`；`Suspend`
   是 LitePush 能力，EventBus 不会发出它。
-- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`（Remoting 客户端 [`remoting-v0.6.1`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.1/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)）是只包含 `Success` 和 `Retry`
+- `EventHorizon.RocketMQ.Remoting.Consumer.ConsumeResult`（Remoting 客户端 [`remoting-v0.6.2`](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/blob/remoting-v0.6.2/src/EventHorizon.RocketMQ.Remoting/Consumer/ConsumeResult.cs)）是只包含 `Success` 和 `Retry`
   的枚举。EventBus 使用默认延迟执行普通重试，绝不请求直接进入死信队列。
 
 EventBus 对两种协议使用相同的路由、消息体和 Handler 分类规则，再把内部判断映射到所属传输层支持的结果。因此，

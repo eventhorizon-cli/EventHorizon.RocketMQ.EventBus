@@ -180,7 +180,7 @@ Payload 的处置方式。
 | `SkipDeserializationFailures = false` 时反序列化失败 | `Retry`，并带有反序列化失败诊断标记 | `ConsumeResult.Retry`，使用默认延迟级别 `0` |
 | Host 停止并取消投递 | 继续传播取消，不额外生成结果 | 继续传播取消 |
 
-Remoting 客户端 0.6.1 的 `ConsumeResult` 枚举只有 `Success` 和 `Retry`。EventBus 绝不设置负延迟级别哨兵值，也不请求
+Remoting 客户端 0.6.2 的 `ConsumeResult` 枚举只有 `Success` 和 `Retry`。EventBus 绝不设置负延迟级别哨兵值，也不请求
 直接进入 DLQ：内部 `Retry` 映射为 `ConsumeResult.Retry`，并保持 `RemotingPushConsumeContext.DelayLevelWhenNextConsume`
 的默认值 `0`。普通重试进度以及最终是否进入 DLQ 由底层 Remoting 客户端和服务端负责。gRPC 适配器会把同一个内部
 `Retry` 映射为 `Failure`。
